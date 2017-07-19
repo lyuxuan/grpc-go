@@ -13,4 +13,5 @@ var (
 	lookupSRV  = func(ctx context.Context, service, proto, name string) (string, []*net.SRV, error) {
 		return net.LookupSRV(service, proto, name)
 	}
+	lookupTxt = func(ctx context.Context, name string) ([]string, error) { return net.LookupTXT(name) }
 )

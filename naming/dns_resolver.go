@@ -1,13 +1,14 @@
 package naming
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"golang.org/x/net/context"
 	"net"
+	"os"
 	"strconv"
 	"time"
-
-	"golang.org/x/net/context"
 
 	"google.golang.org/grpc/grpclog"
 )
@@ -239,6 +240,19 @@ func (w *dnsWatcher) lkpHost() []*Update {
 	return newAddrs
 }
 
+func (w *dnsWatcher) lkpTxt() []byte {
+	ss, err := lookupTxt(w.ctx, w.host)
+	if err != nil {
+		grpclog.Warningf("grpc: failed dns TXT record lookup due to %v.\n", err)
+		return nil
+	}
+	var res string
+	for _, s := range ss {
+		res += s
+	}
+	return []byte(res)
+}
+
 func (w *dnsWatcher) lookup() []*Update {
 	newAddrs := w.lkpSRV()
 	if newAddrs == nil {
@@ -249,7 +263,68 @@ func (w *dnsWatcher) lookup() []*Update {
 	}
 	result := w.compileUpdate(newAddrs)
 	w.curAddrs = newAddrs
+	js := w.lkpTxt()
+	processSCFile(js)
 	return result
+}
+
+func containsString(a []string, b string) bool {
+	if len(a) == 0 {
+		return true
+	}
+	for _, c := range a {
+		if c == b {
+			return true
+		}
+	}
+	return false
+}
+
+func chosenByPercentage(a *int, b int) bool {
+	if a == nil {
+		return true
+	}
+	if *a == 0 {
+		return false
+	}
+	return true
+}
+
+type RawChoice struct {
+	ClientLanguage []string        `json:"clientLanguage,omitempty"`
+	Percentage     *int            `json:"percentage,omitempty"`
+	ClientHostName []string        `json:"clientHostName,omitempty"`
+	ServiceConfig  json.RawMessage `json:"serviceConfig,omitempty"`
+}
+
+func processSCFile(js []byte) []byte {
+	if js == nil {
+		return nil
+	}
+	var rcs []RawChoice
+	fmt.Println(string(js))
+	err := json.Unmarshal(js, &rcs)
+	if err != nil {
+		grpclog.Warningf("grpc: failed to parse service config json string due to %v.\n", err)
+		return nil
+	}
+
+	var sc []byte
+	clihostname, err := os.Hostname()
+	if err != nil {
+		grpclog.Warningf("grpc: failed to get client hostname due to %v.\n", err)
+		return nil
+	}
+	for _, c := range rcs {
+		if !containsString(c.ClientLanguage, "GO") ||
+			!containsString(c.ClientHostName, clihostname) ||
+			!chosenByPercentage(c.Percentage, 1) {
+			continue
+		}
+		sc = c.ServiceConfig
+		break
+	}
+	return sc
 }
 
 // Next returns the resolved address update(delta) for the target. If there's no
@@ -261,6 +336,7 @@ func (w *dnsWatcher) Next() ([]*Update, error) {
 	default:
 	}
 	result := w.lookup()
+
 	if len(result) > 0 {
 		return result, nil
 	}
