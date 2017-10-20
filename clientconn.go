@@ -24,6 +24,7 @@ import (
 	"math"
 	"net"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +33,7 @@ import (
 	"golang.org/x/net/trace"
 	"google.golang.org/grpc/balancer"
 	_ "google.golang.org/grpc/balancer/roundrobin" // To register roundrobin.
+	"google.golang.org/grpc/channelz"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/grpclog"
@@ -370,6 +372,8 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 
 		blockingpicker: newPickerWrapper(),
 	}
+	id := channelz.RegisterTopChannel(cc)
+	cc.id = id
 	cc.ctx, cc.cancel = context.WithCancel(context.Background())
 
 	for _, opt := range opts {
@@ -562,6 +566,7 @@ type ClientConn struct {
 	authority    string
 	dopts        dialOptions
 	csMgr        *connectivityStateManager
+	id           int64
 
 	customBalancer    bool // If this is true, switching balancer will be disabled.
 	balancerBuildOpts balancer.BuildOptions
@@ -577,6 +582,10 @@ type ClientConn struct {
 	curBalancerName string
 	curAddresses    []resolver.Address
 	balancerWrapper *ccBalancerWrapper
+}
+
+func (cc *ClientConn) GetDesc() string {
+	return cc.target + strconv.FormatInt(cc.id, 10)
 }
 
 // WaitForStateChange waits until the connectivity.State of ClientConn changes from sourceState or
@@ -690,6 +699,7 @@ func (cc *ClientConn) newAddrConn(addrs []resolver.Address) (*addrConn, error) {
 		addrs: addrs,
 		dopts: cc.dopts,
 	}
+	ac.id = channelz.RegisterChannel(ac)
 	ac.ctx, ac.cancel = context.WithCancel(cc.ctx)
 	// Track ac in cc. This needs to be done before any getTransport(...) is called.
 	cc.mu.Lock()
@@ -699,12 +709,14 @@ func (cc *ClientConn) newAddrConn(addrs []resolver.Address) (*addrConn, error) {
 	}
 	cc.conns[ac] = struct{}{}
 	cc.mu.Unlock()
+	channelz.AddChild(cc.id, ac.id)
 	return ac, nil
 }
 
 // removeAddrConn removes the addrConn in the subConn from clientConn.
 // It also tears down the ac with the given error.
 func (cc *ClientConn) removeAddrConn(ac *addrConn, err error) {
+	fmt.Println("PPPPPPPPPPPPPPPPPPPPPP")
 	cc.mu.Lock()
 	if cc.conns == nil {
 		cc.mu.Unlock()
@@ -713,6 +725,13 @@ func (cc *ClientConn) removeAddrConn(ac *addrConn, err error) {
 	delete(cc.conns, ac)
 	cc.mu.Unlock()
 	ac.tearDown(err)
+	channelz.RemoveChild(cc.id, ac.id)
+	fmt.Println("ac.id", ac.id)
+	channelz.RemoveEntry(ac.id)
+}
+
+func (ac *addrConn) GetDesc() string {
+	return "to be decided"
 }
 
 // connect starts to creating transport and also starts the transport monitor
@@ -851,6 +870,7 @@ func (cc *ClientConn) Close() error {
 	for ac := range conns {
 		ac.tearDown(ErrClientConnClosing)
 	}
+	channelz.RemoveEntry(cc.id)
 	return nil
 }
 
@@ -865,6 +885,7 @@ type addrConn struct {
 	dopts   dialOptions
 	events  trace.EventLog
 	acbw    balancer.SubConn
+	id      int64
 
 	mu    sync.Mutex
 	state connectivity.State
@@ -983,6 +1004,8 @@ func (ac *addrConn) resetTransport() error {
 				ac.mu.Unlock()
 				continue
 			}
+			id := channelz.RegisterSocket(ac.id, newTransport.(channelz.Socket))
+			channelz.AddChild(ac.id, id)
 			ac.mu.Lock()
 			ac.printf("ready")
 			if ac.state == connectivity.Shutdown {

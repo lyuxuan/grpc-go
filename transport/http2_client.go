@@ -31,6 +31,7 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
+	"google.golang.org/grpc/channelz"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
@@ -81,6 +82,8 @@ type http2Client struct {
 
 	creds []credentials.PerRPCCredentials
 
+	chzID int64
+	pid   int64
 	// Boolean to keep track of reading activity on transport.
 	// 1 is true and 0 is false.
 	activity uint32 // Accessed atomically.
@@ -306,6 +309,15 @@ func newHTTP2Client(ctx context.Context, addr TargetInfo, opts ConnectOptions, t
 		go t.keepalive()
 	}
 	return t, nil
+}
+
+func (t *http2Client) GetDesc() string {
+	return t.remoteAddr.String()
+}
+
+func (t *http2Client) SetIDs(pid, id int64) {
+	t.chzID = id
+	t.pid = pid
 }
 
 func (t *http2Client) newStream(ctx context.Context, callHdr *CallHdr) *Stream {
@@ -612,6 +624,8 @@ func (t *http2Client) Close() error {
 		}
 		t.statsHandler.HandleConn(t.ctx, connEnd)
 	}
+	channelz.RemoveEntry(t.chzID)
+	channelz.RemoveChild(t.pid, t.chzID)
 	return err
 }
 
