@@ -1188,7 +1188,7 @@ func (ac *addrConn) tearDown(err error) {
 	return
 }
 
-func (ac *addrConn) getState() connectivity.State {
+func (ac *addrConn) GetState() connectivity.State {
 	ac.mu.Lock()
 	defer ac.mu.Unlock()
 	return ac.state

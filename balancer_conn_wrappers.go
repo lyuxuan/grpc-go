@@ -233,7 +233,7 @@ func (acbw *acBalancerWrapper) UpdateAddresses(addrs []resolver.Address) {
 		// and creating new ac, fix the transition.
 		acbw.ac.acbw = nil
 		acbw.ac.mu.Unlock()
-		acState := acbw.ac.getState()
+		acState := acbw.ac.GetState()
 		acbw.ac.tearDown(errConnDrain)
 
 		if acState == connectivity.Shutdown {
