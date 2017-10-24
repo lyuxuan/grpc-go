@@ -25,6 +25,7 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/net/trace"
 	"google.golang.org/grpc/balancer"
+	"google.golang.org/grpc/channelz"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/peer"
@@ -266,6 +267,7 @@ func invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 			if !c.failFast {
 				continue
 			}
+			t.(channelz.ChannelCallCount).ParentCallFail()
 			return toRPCErr(err)
 		}
 		if peer, ok := peer.FromContext(stream.Context()); ok {
@@ -296,6 +298,7 @@ func invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 				}
 				// Otherwise, give up and return an error anyway.
 			}
+			t.(channelz.ChannelCallCount).ParentCallFail()
 			return toRPCErr(err)
 		}
 		err = recvResponse(ctx, cc.dopts, t, c, stream, reply)
@@ -317,6 +320,7 @@ func invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 				}
 				// Otherwise, give up and return an error anyway.
 			}
+			t.(channelz.ChannelCallCount).ParentCallFail()
 			return toRPCErr(err)
 		}
 		if c.traceInfo.tr != nil {

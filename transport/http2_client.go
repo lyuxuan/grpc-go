@@ -320,6 +320,10 @@ func (t *http2Client) SetIDs(pid, id int64) {
 	t.pid = pid
 }
 
+func (t *http2Client) GetIDs() (_, _ int64) {
+	return t.pid, t.chzID
+}
+
 func (t *http2Client) newStream(ctx context.Context, callHdr *CallHdr) *Stream {
 	// TODO(zhaoq): Handle uint32 overflow of Stream.id.
 	s := &Stream{
@@ -358,6 +362,18 @@ func (t *http2Client) newStream(ctx context.Context, callHdr *CallHdr) *Stream {
 		goAway: s.goAway,
 	}
 	return s
+}
+
+func (t *http2Client) ParentCallStart() {
+	channelz.CallStart(t.pid)
+}
+
+func (t *http2Client) ParentCallSucceed() {
+	channelz.CallSucceed(t.pid)
+}
+
+func (t *http2Client) ParentCallFail() {
+	channelz.CallFail(t.pid)
 }
 
 // NewStream creates a stream and registers it into the transport as "active"

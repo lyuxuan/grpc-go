@@ -716,7 +716,6 @@ func (cc *ClientConn) newAddrConn(addrs []resolver.Address) (*addrConn, error) {
 // removeAddrConn removes the addrConn in the subConn from clientConn.
 // It also tears down the ac with the given error.
 func (cc *ClientConn) removeAddrConn(ac *addrConn, err error) {
-	fmt.Println("PPPPPPPPPPPPPPPPPPPPPP")
 	cc.mu.Lock()
 	if cc.conns == nil {
 		cc.mu.Unlock()
@@ -726,7 +725,6 @@ func (cc *ClientConn) removeAddrConn(ac *addrConn, err error) {
 	cc.mu.Unlock()
 	ac.tearDown(err)
 	channelz.RemoveChild(cc.id, ac.id)
-	fmt.Println("ac.id", ac.id)
 	channelz.RemoveEntry(ac.id)
 }
 
@@ -869,6 +867,7 @@ func (cc *ClientConn) Close() error {
 	}
 	for ac := range conns {
 		ac.tearDown(ErrClientConnClosing)
+		channelz.RemoveEntry(ac.id)
 	}
 	channelz.RemoveEntry(cc.id)
 	return nil

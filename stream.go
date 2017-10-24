@@ -27,6 +27,7 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/net/trace"
 	"google.golang.org/grpc/balancer"
+	"google.golang.org/grpc/channelz"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/metadata"
@@ -228,6 +229,7 @@ func newClientStream(ctx context.Context, desc *StreamDesc, cc *ClientConn, meth
 		if err != nil {
 			return nil, err
 		}
+		t.(channelz.ChannelCallCount).ParentCallStart()
 
 		s, err = t.NewStream(ctx, callHdr)
 		if err != nil {
@@ -241,6 +243,7 @@ func newClientStream(ctx context.Context, desc *StreamDesc, cc *ClientConn, meth
 			if !c.failFast {
 				continue
 			}
+			t.(channelz.ChannelCallCount).ParentCallFail()
 			return nil, toRPCErr(err)
 		}
 		break
@@ -546,6 +549,11 @@ func (cs *clientStream) finish(err error) {
 			end.Error = toRPCErr(err)
 		}
 		cs.statsHandler.HandleRPC(cs.statsCtx, end)
+	}
+	if err != nil && err != io.EOF {
+		cs.t.(channelz.ChannelCallCount).ParentCallFail()
+	} else {
+		cs.t.(channelz.ChannelCallCount).ParentCallSucceed()
 	}
 	if !cs.tracing {
 		return
