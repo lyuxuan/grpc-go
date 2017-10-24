@@ -96,9 +96,13 @@ type http2Client struct {
 	bdpEst          *bdpEstimator
 	outQuotaVersion uint32
 
-	mu            sync.Mutex     // guard the following variables
-	state         transportState // the state of underlying connection
-	activeStreams map[uint32]*Stream
+	mu               sync.Mutex     // guard the following variables
+	state            transportState // the state of underlying connection
+	activeStreams    map[uint32]*Stream
+	streamsSucceeded int64
+	streamsFailed    int64
+	msgSent          int64
+	msgRecv          int64
 	// The max number of concurrent streams
 	maxStreams int
 	// the per-stream outbound flow control window size set by the peer.
@@ -550,6 +554,39 @@ func (t *http2Client) NewStream(ctx context.Context, callHdr *CallHdr) (_ *Strea
 	return s, nil
 }
 
+func (t *http2Client) GetStreamsStarted() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.activeStreams == nil {
+		return 0
+	}
+	return int64(len(t.activeStreams))
+}
+
+func (t *http2Client) GetStreamsSucceeded() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.streamsSucceeded
+}
+
+func (t *http2Client) GetStreamsFailed() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.streamsFailed
+}
+
+func (t *http2Client) incrMsgSent() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.msgSent++
+}
+
+func (t *http2Client) incrMsgRecv() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.msgRecv++
+}
+
 // CloseStream clears the footprint of a stream when the stream is not needed any more.
 // This must not be executed in reader's goroutine.
 func (t *http2Client) CloseStream(s *Stream, err error) {
@@ -563,6 +600,11 @@ func (t *http2Client) CloseStream(s *Stream, err error) {
 		s.write(recvMsg{err: err})
 	}
 	delete(t.activeStreams, s.id)
+	if err != nil {
+		t.streamsFailed++
+	} else {
+		t.streamsSucceeded++
+	}
 	if t.state == draining && len(t.activeStreams) == 0 {
 		// The transport is draining and s is the last live stream on t.
 		t.mu.Unlock()
