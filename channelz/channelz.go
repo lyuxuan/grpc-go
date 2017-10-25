@@ -21,8 +21,12 @@ func init() {
 			fmt.Printf("######## %+v\n", channelTbl)
 			for k, v := range channelTbl.m {
 				fmt.Printf("##  %+v, %+v\n", k, v)
-				if v.IsChannel() {
-					fmt.Println(v, v.(*channel).c.GetState())
+				// if v.IsChannel() {
+				// 	fmt.Println(v, v.(*channel).c.GetState())
+				// 	fmt.Printf("%+v\n", v)
+				// }
+				if !v.IsChannel() {
+					fmt.Println(v.(*socket).s.GetStreamsStarted(), v.(*socket).s.GetStreamsSucceeded(), v.(*socket).s.GetStreamsFailed(), v.(*socket).s.GetMsgSent(), v.(*socket).s.GetMsgRecv())
 					fmt.Printf("%+v\n", v)
 				}
 			}

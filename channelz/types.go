@@ -24,6 +24,7 @@ type ChannelCallCount interface {
 	ParentCallSucceed()
 	ParentCallFail()
 }
+
 type conn interface {
 	IsChannel() bool
 }
@@ -72,6 +73,16 @@ func (c *channel) CallFail() {
 type Socket interface {
 	GetDesc() string
 	SetIDs(int64, int64)
+	GetMsgSent() int64
+	GetMsgRecv() int64
+	GetStreamsStarted() int64
+	GetStreamsSucceeded() int64
+	GetStreamsFailed() int64
+}
+
+type SocketCount interface {
+	IncrMsgSent()
+	IncrMsgRecv()
 }
 
 type socket struct {

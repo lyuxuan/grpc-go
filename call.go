@@ -45,6 +45,8 @@ func recvResponse(ctx context.Context, dopts dialOptions, t transport.ClientTran
 			if _, ok := err.(transport.ConnectionError); !ok {
 				t.CloseStream(stream, err)
 			}
+		} else {
+			t.(channelz.SocketCount).IncrMsgRecv()
 		}
 	}()
 	c.headerMD, err = stream.Header()
@@ -96,6 +98,8 @@ func sendRequest(ctx context.Context, dopts dialOptions, compressor Compressor, 
 			if _, ok := err.(transport.ConnectionError); !ok {
 				t.CloseStream(stream, err)
 			}
+		} else {
+			t.(channelz.SocketCount).IncrMsgSent()
 		}
 	}()
 	var (

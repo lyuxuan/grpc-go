@@ -88,6 +88,7 @@ type http2Client struct {
 	// 1 is true and 0 is false.
 	activity uint32 // Accessed atomically.
 	kp       keepalive.ClientParameters
+	kpCount  int64
 
 	statsHandler stats.Handler
 
@@ -96,13 +97,16 @@ type http2Client struct {
 	bdpEst          *bdpEstimator
 	outQuotaVersion uint32
 
-	mu               sync.Mutex     // guard the following variables
-	state            transportState // the state of underlying connection
-	activeStreams    map[uint32]*Stream
-	streamsSucceeded int64
-	streamsFailed    int64
-	msgSent          int64
-	msgRecv          int64
+	mu                sync.Mutex     // guard the following variables
+	state             transportState // the state of underlying connection
+	activeStreams     map[uint32]*Stream
+	streamsSucceeded  int64
+	streamsFailed     int64
+	lastStreamCreated time.Time
+	msgSent           int64
+	msgRecv           int64
+	lastMsgSent       time.Time
+	lastMsgRecv       time.Time
 	// The max number of concurrent streams
 	maxStreams int
 	// the per-stream outbound flow control window size set by the peer.
@@ -521,6 +525,7 @@ func (t *http2Client) NewStream(ctx context.Context, callHdr *CallHdr) (_ *Strea
 	}
 	s := t.newStream(ctx, callHdr)
 	t.activeStreams[s.id] = s
+	t.lastStreamCreated = time.Now()
 	// If the number of active streams change from 0 to 1, then check if keepalive
 	// has gone dormant. If so, wake it up.
 	if len(t.activeStreams) == 1 {
@@ -575,16 +580,36 @@ func (t *http2Client) GetStreamsFailed() int64 {
 	return t.streamsFailed
 }
 
-func (t *http2Client) incrMsgSent() {
+func (t *http2Client) IncrMsgSent() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.lastMsgSent = time.Now()
 	t.msgSent++
 }
 
-func (t *http2Client) incrMsgRecv() {
+func (t *http2Client) GetMsgSent() int64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	return t.msgSent
+}
+
+func (t *http2Client) IncrMsgRecv() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.lastMsgRecv = time.Now()
 	t.msgRecv++
+}
+
+func (t *http2Client) GetMsgRecv() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.msgRecv
+}
+
+func (t *http2Client) GetKpCount() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.kpCount
 }
 
 // CloseStream clears the footprint of a stream when the stream is not needed any more.
@@ -600,7 +625,7 @@ func (t *http2Client) CloseStream(s *Stream, err error) {
 		s.write(recvMsg{err: err})
 	}
 	delete(t.activeStreams, s.id)
-	if err != nil {
+	if err != nil && err != io.EOF {
 		t.streamsFailed++
 	} else {
 		t.streamsSucceeded++
@@ -1404,6 +1429,7 @@ func (t *http2Client) keepalive() {
 					return
 				}
 			} else {
+				t.kpCount++
 				t.mu.Unlock()
 				// Send ping.
 				t.controlBuf.put(p)

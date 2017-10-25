@@ -367,6 +367,9 @@ func (cs *clientStream) SendMsg(m interface{}) (err error) {
 		if err != nil {
 			cs.finish(err)
 		}
+		if err == nil || err == io.EOF {
+			cs.t.(channelz.SocketCount).IncrMsgSent()
+		}
 		if err == nil {
 			return
 		}
@@ -440,6 +443,8 @@ func (cs *clientStream) RecvMsg(m interface{}) (err error) {
 		// err != nil indicates the termination of the stream.
 		if err != nil {
 			cs.finish(err)
+		} else {
+			cs.t.(channelz.SocketCount).IncrMsgRecv()
 		}
 	}()
 	if err == nil {
