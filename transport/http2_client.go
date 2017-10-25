@@ -612,6 +612,36 @@ func (t *http2Client) GetKpCount() int64 {
 	return t.kpCount
 }
 
+func (t *http2Client) GetLastStreamCreatedTime() time.Time {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.lastStreamCreated
+}
+
+func (t *http2Client) GetLastMsgSentTime() time.Time {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.lastMsgSent
+}
+
+func (t *http2Client) GetLastMsgRecvTime() time.Time {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.lastMsgRecv
+}
+
+func (t *http2Client) GetLocalFlowControlWindow() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.fc.GetInFlowWindow()
+}
+
+func (t *http2Client) GetRemoteFlowControlWindow() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.sendQuotaPool.GetOutFlowWindow()
+}
+
 // CloseStream clears the footprint of a stream when the stream is not needed any more.
 // This must not be executed in reader's goroutine.
 func (t *http2Client) CloseStream(s *Stream, err error) {

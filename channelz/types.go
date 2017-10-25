@@ -32,6 +32,7 @@ type conn interface {
 type Channel interface {
 	GetDesc() string
 	GetState() connectivity.State
+	GetTarget() string
 }
 
 type channel struct {
@@ -78,6 +79,12 @@ type Socket interface {
 	GetStreamsStarted() int64
 	GetStreamsSucceeded() int64
 	GetStreamsFailed() int64
+	GetKpCount() int64
+	GetLastStreamCreatedTime() time.Time
+	GetLastMsgSentTime() time.Time
+	GetLastMsgRecvTime() time.Time
+	GetLocalFlowControlWindow() int64
+	GetRemoteFlowControlWindow() int64
 }
 
 type SocketCount interface {

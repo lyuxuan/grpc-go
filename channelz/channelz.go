@@ -16,17 +16,34 @@ func init() {
 	idGen = idGenerator{}
 
 	go func() {
-		for i := 0; i < 30; i++ {
+		for i := 0; i < 15; i++ {
 			time.Sleep(time.Second)
 			fmt.Printf("######## %+v\n", channelTbl)
 			for k, v := range channelTbl.m {
-				fmt.Printf("##  %+v, %+v\n", k, v)
-				// if v.IsChannel() {
-				// 	fmt.Println(v, v.(*channel).c.GetState())
-				// 	fmt.Printf("%+v\n", v)
-				// }
+				// fmt.Printf("##  %+v, %+v\n", k, v)
+				if v.IsChannel() {
+					fmt.Println("unique id:", k, "This is a channel. Info listed below")
+					fmt.Println("Connectivity state:", v.(*channel).c.GetState())
+					fmt.Println("Target:", v.(*channel).c.GetTarget())
+					fmt.Println("Calls started:", v.(*channel).callsStarted)
+					fmt.Println("Calls succeeded:", v.(*channel).callsSucceeded)
+					fmt.Println("Calls failed:", v.(*channel).callsFailed)
+					fmt.Println("Last call started time:", v.(*channel).lastCallStartedTime.String())
+					fmt.Printf("%+v\n", v)
+				}
 				if !v.IsChannel() {
-					fmt.Println(v.(*socket).s.GetStreamsStarted(), v.(*socket).s.GetStreamsSucceeded(), v.(*socket).s.GetStreamsFailed(), v.(*socket).s.GetMsgSent(), v.(*socket).s.GetMsgRecv())
+					fmt.Println("unique id:", k, "This is a socket. Info listed below")
+					fmt.Println("Streams started:", v.(*socket).s.GetStreamsStarted())
+					fmt.Println("Streams succeeded:", v.(*socket).s.GetStreamsSucceeded())
+					fmt.Println("Streams failed:", v.(*socket).s.GetStreamsFailed())
+					fmt.Println("Msg sent:", v.(*socket).s.GetMsgSent())
+					fmt.Println("Msg recv:", v.(*socket).s.GetMsgRecv())
+					fmt.Println("Keepalives sent:", v.(*socket).s.GetKpCount())
+					fmt.Println("Last local stream created:", v.(*socket).s.GetLastStreamCreatedTime())
+					fmt.Println("Last msg sent:", v.(*socket).s.GetLastMsgSentTime())
+					fmt.Println("Last msg recv:", v.(*socket).s.GetLastMsgRecvTime())
+					fmt.Println("Local flow fontrol window:", v.(*socket).s.GetLocalFlowControlWindow())
+					fmt.Println("Remote flow control window:", v.(*socket).s.GetRemoteFlowControlWindow())
 					fmt.Printf("%+v\n", v)
 				}
 			}
@@ -94,7 +111,6 @@ func RegisterSocket(pid int64, s Socket) int64 {
 }
 
 func RemoveEntry(id int64) {
-	fmt.Println("remove entry", id)
 	channelTbl.Delete(id)
 }
 
@@ -116,7 +132,6 @@ func AddChild(pid, cid int64) {
 func RemoveChild(pid, cid int64) {
 	channelTbl.Lock()
 	defer channelTbl.Unlock()
-	fmt.Println("remove entry", pid, cid)
 
 	c, ok := channelTbl.m[pid]
 	if !ok {

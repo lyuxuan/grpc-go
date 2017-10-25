@@ -728,6 +728,10 @@ func (cc *ClientConn) removeAddrConn(ac *addrConn, err error) {
 	channelz.RemoveEntry(ac.id)
 }
 
+func (cc *ClientConn) GetTarget() string {
+	return cc.target
+}
+
 func (ac *addrConn) GetDesc() string {
 	return "to be decided"
 }
@@ -1191,4 +1195,10 @@ func (ac *addrConn) GetState() connectivity.State {
 	ac.mu.Lock()
 	defer ac.mu.Unlock()
 	return ac.state
+}
+
+func (ac *addrConn) GetTarget() string {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+	return ac.curAddr.Addr
 }

@@ -123,8 +123,8 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go submain(&wg)
-	// go submain(&wg)
-	// go submain(&wg)
+	go submain(&wg)
+	go submain(&wg)
 	wg.Wait()
 	time.Sleep(5 * time.Second)
 }
