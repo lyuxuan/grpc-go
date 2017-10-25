@@ -145,7 +145,7 @@ func newQuotaPool(q int) *quotaPool {
 	return qb
 }
 
-func (qb *quotaPool) GetCurrentQuota() (res int64) {
+func (qb *quotaPool) GetOutFlowWindow() (res int64) {
 	qb.mu.Lock()
 	defer qb.mu.Unlock()
 	select {
@@ -355,5 +355,5 @@ func (f *inFlow) resetPendingUpdate() uint32 {
 func (f *inFlow) GetInFlowWindow() int64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return int64(f.limit + f.delta)
+	return int64(f.limit)
 }
