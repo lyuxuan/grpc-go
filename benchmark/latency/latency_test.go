@@ -22,7 +22,10 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"os"
 	"reflect"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -166,6 +169,23 @@ func TestSyncTooSlow(t *testing.T) {
 	}
 }
 
+func coutOpenSockets() int {
+	b := make([]byte, 1000000)
+	f, err := os.Open("/proc/net/tcp")
+	n, err := f.Read(b)
+	if err != nil {
+		panic(err)
+	}
+	in := string(b[:n])
+	ss := strings.Split(in, "\n")
+	ll := strings.Split(ss[len(ss)-2], ":")
+	i, err := strconv.Atoi(strings.TrimSpace(ll[0]))
+	if err != nil {
+		panic(err)
+	}
+	return i
+}
+
 func TestListenerAndDialer(t *testing.T) {
 	defer restoreHooks()()
 
@@ -203,6 +223,7 @@ func TestListenerAndDialer(t *testing.T) {
 	}()
 
 	// Create a dialer and use it.
+	fmt.Println("######## number of open socket", coutOpenSockets())
 	clientConn, err := n.TimeoutDialer(net.DialTimeout)("tcp", l.Addr().String(), 2*time.Second)
 	if err != nil {
 		t.Fatalf("Unexpected error dialing: %v", err)
