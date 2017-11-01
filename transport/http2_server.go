@@ -35,6 +35,7 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
+	"google.golang.org/grpc/channelz"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
@@ -78,8 +79,8 @@ type http2Server struct {
 	// 1 is true and 0 is false.
 	activity uint32 // Accessed atomically.
 	// Keepalive and max-age parameters for the server.
-	kp keepalive.ServerParameters
-
+	kp      keepalive.ServerParameters
+	kpCount int64
 	// Keepalive enforcement policy.
 	kep keepalive.EnforcementPolicy
 	// The time instance last ping was received.
@@ -95,6 +96,13 @@ type http2Server struct {
 
 	mu sync.Mutex // guard the following
 
+	streamsSucceeded  int64
+	streamsFailed     int64
+	lastStreamCreated time.Time
+	msgSent           int64
+	msgRecv           int64
+	lastMsgSent       time.Time
+	lastMsgRecv       time.Time
 	// drainChan is initialized when drain(...) is called the first time.
 	// After which the server writes out the first GoAway(with ID 2^31-1) frame.
 	// Then an independent goroutine will be launched to later send the second GoAway.
@@ -257,7 +265,86 @@ func newHTTP2Server(conn net.Conn, config *ServerConfig) (_ ServerTransport, err
 		t.Close()
 	}()
 	go t.keepalive()
+	channelz.RegisterSocket(t)
 	return t, nil
+}
+
+func (t *http2Server) GetDesc() string {
+	return t.remoteAddr.String()
+}
+
+func (t *http2Server) GetMsgSent() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.msgSent
+}
+
+func (t *http2Server) GetMsgRecv() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.msgRecv
+}
+
+func (t *http2Server) GetStreamsStarted() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return int64(len(t.activeStreams))
+}
+
+func (t *http2Server) GetStreamsSucceeded() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.streamsSucceeded
+}
+
+func (t *http2Server) GetStreamsFailed() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.streamsFailed
+}
+
+func (t *http2Server) GetKpCount() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.kpCount
+}
+
+func (t *http2Server) GetLastStreamCreatedTime() time.Time {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.lastStreamCreated
+}
+
+func (t *http2Server) GetLastMsgSentTime() time.Time {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.lastMsgSent
+}
+
+func (t *http2Server) GetLastMsgRecvTime() time.Time {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.lastMsgRecv
+}
+
+func (t *http2Server) GetLocalFlowControlWindow() int64 {
+	return t.fc.GetInFlowWindow()
+}
+
+func (t *http2Server) GetRemoteFlowControlWindow() int64 {
+	return t.sendQuotaPool.GetOutFlowWindow()
+}
+
+func (t *http2Server) IncrMsgSent() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.msgSent++
+}
+
+func (t *http2Server) IncrMsgRecv() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.msgRecv++
 }
 
 // operateHeader takes action on the decoded headers.

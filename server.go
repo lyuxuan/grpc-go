@@ -37,6 +37,7 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/trace"
+	"google.golang.org/grpc/channelz"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/encoding"
@@ -348,7 +349,12 @@ func NewServer(opt ...ServerOption) *Server {
 		_, file, line, _ := runtime.Caller(1)
 		s.events = trace.NewEventLog("grpc.Server", fmt.Sprintf("%s:%d", file, line))
 	}
+	channelz.RegisterServer(s)
 	return s
+}
+
+func (s *Server) GetDesc() string {
+	return "this is a server"
 }
 
 // printf records an event in s's event log, unless s has been stopped.

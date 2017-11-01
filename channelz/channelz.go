@@ -21,17 +21,20 @@ func init() {
 			fmt.Printf("######## %+v\n", channelTbl)
 			for k, v := range channelTbl.m {
 				// fmt.Printf("##  %+v, %+v\n", k, v)
-				if v.IsChannel() {
+				if v.Type() == channelT {
 					fmt.Println("unique id:", k, "This is a channel. Info listed below")
 					fmt.Println("Connectivity state:", v.(*channel).c.GetState())
 					fmt.Println("Target:", v.(*channel).c.GetTarget())
-					fmt.Println("Calls started:", v.(*channel).callsStarted)
-					fmt.Println("Calls succeeded:", v.(*channel).callsSucceeded)
-					fmt.Println("Calls failed:", v.(*channel).callsFailed)
-					fmt.Println("Last call started time:", v.(*channel).lastCallStartedTime.String())
+					// fmt.Println("Calls started:", v.(*channel).callsStarted)
+					fmt.Println("NEW** Calls started:", v.(*channel).c.GetCallsStarted())
+					// fmt.Println("Calls succeeded:", v.(*channel).callsSucceeded)
+					fmt.Println("NEW** Calls succeeded:", v.(*channel).c.GetCallsSucceeded())
+					// fmt.Println("Calls failed:", v.(*channel).callsFailed)
+					fmt.Println("NEW** Calls failed:", v.(*channel).c.GetCallsFailed())
+					// fmt.Println("Last call started time:", v.(*channel).lastCallStartedTime.String())
+					fmt.Println("NEW** Last call started time:", v.(*channel).c.GetLastCallStartedTime().String())
 					fmt.Printf("%+v\n", v)
-				}
-				if !v.IsChannel() {
+				} else if v.Type() == socketT {
 					fmt.Println("unique id:", k, "This is a socket. Info listed below")
 					fmt.Println("Streams started:", v.(*socket).s.GetStreamsStarted())
 					fmt.Println("Streams succeeded:", v.(*socket).s.GetStreamsSucceeded())
@@ -45,6 +48,8 @@ func init() {
 					fmt.Println("Local flow fontrol window:", v.(*socket).s.GetLocalFlowControlWindow())
 					fmt.Println("Remote flow control window:", v.(*socket).s.GetRemoteFlowControlWindow())
 					fmt.Printf("%+v\n", v)
+				} else {
+
 				}
 			}
 			fmt.Println("\n\n")
@@ -103,10 +108,15 @@ func RegisterChannel(c Channel) int64 {
 	return id
 }
 
-func RegisterSocket(pid int64, s Socket) int64 {
+func RegisterSocket(s Socket) int64 {
 	id := idGen.genID()
 	channelTbl.Add(id, &socket{name: s.GetDesc(), s: s})
-	s.SetIDs(pid, id)
+	return id
+}
+
+func RegisterServer(s Server) int64 {
+	id := idGen.genID()
+	channelTbl.Add(id, &server{name: s.GetDesc(), s: s})
 	return id
 }
 
@@ -122,7 +132,7 @@ func AddChild(pid, cid int64) {
 		grpclog.Infof("parent has been deleted.")
 		return
 	}
-	if c.IsChannel() {
+	if c.Type() == channelT {
 		c.(*channel).children[cid] = struct{}{}
 	} else {
 		grpclog.Error("socket cannot have children")
@@ -138,55 +148,10 @@ func RemoveChild(pid, cid int64) {
 		grpclog.Info("parent has been deleted.")
 		return
 	}
-	if c.IsChannel() {
+	if c.Type() == channelT {
 		delete(c.(*channel).children, cid)
 	} else {
 		grpclog.Error("socket cannot have children")
-	}
-}
-
-func CallStart(id int64) {
-	channelTbl.Lock()
-	defer channelTbl.Unlock()
-	c, ok := channelTbl.m[id]
-	if !ok {
-		grpclog.Infof("no such channel with id: %d currently exists.", id)
-		return
-	}
-	if c.IsChannel() {
-		c.(*channel).CallStart()
-	} else {
-		grpclog.Error("socket do not have such function")
-	}
-}
-
-func CallSucceed(id int64) {
-	channelTbl.Lock()
-	defer channelTbl.Unlock()
-	c, ok := channelTbl.m[id]
-	if !ok {
-		grpclog.Infof("no such channel with id: %d currently exists.", id)
-		return
-	}
-	if c.IsChannel() {
-		c.(*channel).CallSucceed()
-	} else {
-		grpclog.Error("socket do not have such function")
-	}
-}
-
-func CallFail(id int64) {
-	channelTbl.Lock()
-	defer channelTbl.Unlock()
-	c, ok := channelTbl.m[id]
-	if !ok {
-		grpclog.Infof("no such channel with id: %d currently exists.", id)
-		return
-	}
-	if c.IsChannel() {
-		c.(*channel).CallFail()
-	} else {
-		grpclog.Error("socket do not have such function")
 	}
 }
 

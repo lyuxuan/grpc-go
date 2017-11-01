@@ -46,7 +46,7 @@ func recvResponse(ctx context.Context, dopts dialOptions, t transport.ClientTran
 				t.CloseStream(stream, err)
 			}
 		} else {
-			t.(channelz.SocketCount).IncrMsgRecv()
+			t.(channelz.Socket).IncrMsgRecv()
 		}
 	}()
 	c.headerMD, err = stream.Header()
@@ -99,7 +99,7 @@ func sendRequest(ctx context.Context, dopts dialOptions, compressor Compressor, 
 				t.CloseStream(stream, err)
 			}
 		} else {
-			t.(channelz.SocketCount).IncrMsgSent()
+			t.(channelz.Socket).IncrMsgSent()
 		}
 	}()
 	var (
@@ -164,6 +164,14 @@ func Invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 }
 
 func invoke(ctx context.Context, method string, args, reply interface{}, cc *ClientConn, opts ...CallOption) (e error) {
+	cc.incrCallsStarted()
+	defer func() {
+		if e != nil {
+			cc.incrCallsFailed()
+		} else {
+			cc.incrCallsSucceeded()
+		}
+	}()
 	c := defaultCallInfo()
 	mc := cc.GetMethodConfig(method)
 	if mc.WaitForReady != nil {
@@ -260,18 +268,28 @@ func invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 		if err != nil {
 			return err
 		}
+<<<<<<< HEAD
 		stream, err := t.NewStream(ctx, callHdr)
+=======
+		if c.traceInfo.tr != nil {
+			c.traceInfo.tr.LazyLog(&payload{sent: true, msg: args}, true)
+		}
+		stream, err = t.NewStream(ctx, callHdr)
+>>>>>>> server init
 		if err != nil {
 			if done != nil {
 				done(balancer.DoneInfo{Err: err})
 			}
+<<<<<<< HEAD
 			// In the event of any error from NewStream, we never attempted to write
 			// anything to the wire, so we can retry indefinitely for non-fail-fast
 			// RPCs.
 			if !c.failFast {
+=======
+			if _, ok := err.(transport.ConnectionError); (ok || err == transport.ErrStreamDrain) && !c.failFast {
+>>>>>>> server init
 				continue
 			}
-			t.(channelz.ChannelCallCount).ParentCallFail()
 			return toRPCErr(err)
 		}
 		if peer, ok := peer.FromContext(stream.Context()); ok {
@@ -290,6 +308,7 @@ func invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 				done(balancer.DoneInfo{Err: err})
 			}
 			// Retry a non-failfast RPC when
+<<<<<<< HEAD
 			// i) the server started to drain before this RPC was initiated.
 			// ii) the server refused the stream.
 			if !c.failFast && stream.Unprocessed() {
@@ -301,8 +320,13 @@ func invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 					continue
 				}
 				// Otherwise, give up and return an error anyway.
+=======
+			// i) there is a connection error; or
+			// ii) the server started to drain before this RPC was initiated.
+			if _, ok := err.(transport.ConnectionError); (ok || err == transport.ErrStreamDrain) && !c.failFast {
+				continue
+>>>>>>> server init
 			}
-			t.(channelz.ChannelCallCount).ParentCallFail()
 			return toRPCErr(err)
 		}
 		err = recvResponse(ctx, cc.dopts, t, c, stream, reply)
@@ -314,6 +338,7 @@ func invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 				})
 				done(balancer.DoneInfo{Err: err})
 			}
+<<<<<<< HEAD
 			if !c.failFast && stream.Unprocessed() {
 				// In these cases, the server did not receive the data, but we still
 				// created wire traffic, so we should not retry indefinitely.
@@ -323,14 +348,18 @@ func invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 					continue
 				}
 				// Otherwise, give up and return an error anyway.
+=======
+			if _, ok := err.(transport.ConnectionError); (ok || err == transport.ErrStreamDrain) && !c.failFast {
+				continue
+>>>>>>> server init
 			}
-			t.(channelz.ChannelCallCount).ParentCallFail()
 			return toRPCErr(err)
 		}
 		if c.traceInfo.tr != nil {
 			c.traceInfo.tr.LazyLog(&payload{sent: false, msg: reply}, true)
 		}
 		t.CloseStream(stream, nil)
+		err = stream.Status().Err()
 		if done != nil {
 			updateRPCInfoInContext(ctx, rpcInfo{
 				bytesSent:     true,
@@ -338,6 +367,7 @@ func invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 			})
 			done(balancer.DoneInfo{Err: err})
 		}
+<<<<<<< HEAD
 		if !c.failFast && stream.Unprocessed() {
 			// In these cases, the server did not receive the data, but we still
 			// created wire traffic, so we should not retry indefinitely.
@@ -348,5 +378,8 @@ func invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 			}
 		}
 		return stream.Status().Err()
+=======
+		return err
+>>>>>>> server init
 	}
 }

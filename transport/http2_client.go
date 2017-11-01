@@ -372,18 +372,6 @@ func (t *http2Client) newStream(ctx context.Context, callHdr *CallHdr) *Stream {
 	return s
 }
 
-func (t *http2Client) ParentCallStart() {
-	channelz.CallStart(t.pid)
-}
-
-func (t *http2Client) ParentCallSucceed() {
-	channelz.CallSucceed(t.pid)
-}
-
-func (t *http2Client) ParentCallFail() {
-	channelz.CallFail(t.pid)
-}
-
 // NewStream creates a stream and registers it into the transport as "active"
 // streams.
 func (t *http2Client) NewStream(ctx context.Context, callHdr *CallHdr) (_ *Stream, err error) {

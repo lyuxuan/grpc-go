@@ -578,10 +578,14 @@ type ClientConn struct {
 	scRaw string
 	conns map[*addrConn]struct{}
 	// Keepalive parameter can be updated if a GoAway is received.
-	mkp             keepalive.ClientParameters
-	curBalancerName string
-	curAddresses    []resolver.Address
-	balancerWrapper *ccBalancerWrapper
+	mkp                 keepalive.ClientParameters
+	curBalancerName     string
+	curAddresses        []resolver.Address
+	balancerWrapper     *ccBalancerWrapper
+	callsStarted        int64
+	callsSucceeded      int64
+	callsFailed         int64
+	lastCallStartedTime time.Time
 }
 
 func (cc *ClientConn) GetDesc() string {
@@ -732,8 +736,49 @@ func (cc *ClientConn) GetTarget() string {
 	return cc.target
 }
 
-func (ac *addrConn) GetDesc() string {
-	return "to be decided"
+func (cc *ClientConn) incrCallsStarted() {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	cc.callsStarted++
+	cc.lastCallStartedTime = time.Now()
+}
+
+func (cc *ClientConn) GetCallsStarted() int64 {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	return cc.callsStarted
+}
+
+func (cc *ClientConn) GetLastCallStartedTime() time.Time {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	return cc.lastCallStartedTime
+}
+
+func (cc *ClientConn) GetCallsSucceeded() int64 {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	return cc.callsSucceeded
+}
+
+func (cc *ClientConn) GetCallsFailed() int64 {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	return cc.callsFailed
+}
+
+func (cc *ClientConn) incrCallsSucceeded() {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	cc.callsStarted--
+	cc.callsSucceeded++
+}
+
+func (cc *ClientConn) incrCallsFailed() {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	cc.callsStarted--
+	cc.callsFailed++
 }
 
 // connect starts to creating transport and also starts the transport monitor
@@ -899,6 +944,11 @@ type addrConn struct {
 
 	// The reason this addrConn is torn down.
 	tearDownErr error
+
+	callsStarted        int64
+	callsSucceeded      int64
+	callsFailed         int64
+	lastCallStartedTime time.Time
 }
 
 // adjustParams updates parameters used to create transports upon
@@ -1007,7 +1057,7 @@ func (ac *addrConn) resetTransport() error {
 				ac.mu.Unlock()
 				continue
 			}
-			id := channelz.RegisterSocket(ac.id, newTransport.(channelz.Socket))
+			id := channelz.RegisterSocket(newTransport.(channelz.Socket))
 			channelz.AddChild(ac.id, id)
 			ac.mu.Lock()
 			ac.printf("ready")
@@ -1201,4 +1251,53 @@ func (ac *addrConn) GetTarget() string {
 	ac.mu.Lock()
 	defer ac.mu.Unlock()
 	return ac.curAddr.Addr
+}
+
+func (ac *addrConn) incrCallsStarted() {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+	ac.callsStarted++
+	ac.lastCallStartedTime = time.Now()
+}
+
+func (ac *addrConn) incrCallsSucceeded() {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+	ac.callsStarted--
+	ac.callsSucceeded++
+}
+
+func (ac *addrConn) incrCallsFailed() {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+	ac.callsStarted--
+	ac.callsFailed++
+}
+
+func (ac *addrConn) GetCallsStarted() int64 {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+	return ac.callsStarted
+}
+
+func (ac *addrConn) GetLastCallStartedTime() time.Time {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+	return ac.lastCallStartedTime
+}
+
+func (ac *addrConn) GetCallsSucceeded() int64 {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+	return ac.callsSucceeded
+}
+
+func (ac *addrConn) GetCallsFailed() int64 {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+	return ac.callsFailed
+}
+
+func (ac *addrConn) GetDesc() string {
+	return "to be decided"
 }

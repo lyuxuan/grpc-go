@@ -113,6 +113,14 @@ func NewClientStream(ctx context.Context, desc *StreamDesc, cc *ClientConn, meth
 }
 
 func newClientStream(ctx context.Context, desc *StreamDesc, cc *ClientConn, method string, opts ...CallOption) (_ ClientStream, err error) {
+	cc.incrCallsStarted()
+	defer func() {
+		if err != nil {
+			cc.incrCallsFailed()
+		} else {
+			cc.incrCallsSucceeded()
+		}
+	}()
 	var (
 		t      transport.ClientTransport
 		s      *transport.Stream
@@ -229,7 +237,6 @@ func newClientStream(ctx context.Context, desc *StreamDesc, cc *ClientConn, meth
 		if err != nil {
 			return nil, err
 		}
-		t.(channelz.ChannelCallCount).ParentCallStart()
 
 		s, err = t.NewStream(ctx, callHdr)
 		if err != nil {
@@ -243,7 +250,6 @@ func newClientStream(ctx context.Context, desc *StreamDesc, cc *ClientConn, meth
 			if !c.failFast {
 				continue
 			}
-			t.(channelz.ChannelCallCount).ParentCallFail()
 			return nil, toRPCErr(err)
 		}
 		break
@@ -256,6 +262,7 @@ func newClientStream(ctx context.Context, desc *StreamDesc, cc *ClientConn, meth
 	cs := &clientStream{
 		opts:   opts,
 		c:      c,
+		cc:     cc,
 		desc:   desc,
 		codec:  cc.dopts.codec,
 		cp:     cp,
@@ -304,6 +311,7 @@ func newClientStream(ctx context.Context, desc *StreamDesc, cc *ClientConn, meth
 type clientStream struct {
 	opts []CallOption
 	c    *callInfo
+	cc   *ClientConn
 	t    transport.ClientTransport
 	s    *transport.Stream
 	p    *parser
@@ -368,7 +376,7 @@ func (cs *clientStream) SendMsg(m interface{}) (err error) {
 			cs.finish(err)
 		}
 		if err == nil || err == io.EOF {
-			cs.t.(channelz.SocketCount).IncrMsgSent()
+			cs.t.(channelz.Socket).IncrMsgSent()
 		}
 		if err == nil {
 			return
@@ -444,7 +452,7 @@ func (cs *clientStream) RecvMsg(m interface{}) (err error) {
 		if err != nil {
 			cs.finish(err)
 		} else {
-			cs.t.(channelz.SocketCount).IncrMsgRecv()
+			cs.t.(channelz.Socket).IncrMsgRecv()
 		}
 	}()
 	if err == nil {
@@ -544,6 +552,11 @@ func (cs *clientStream) finish(err error) {
 		cs.done(balancer.DoneInfo{Err: err})
 		cs.done = nil
 	}
+	if err != nil && err != io.EOF {
+		cs.cc.incrCallsFailed()
+	} else {
+		cs.cc.incrCallsSucceeded()
+	}
 	if cs.statsHandler != nil {
 		end := &stats.End{
 			Client:  true,
@@ -554,11 +567,6 @@ func (cs *clientStream) finish(err error) {
 			end.Error = toRPCErr(err)
 		}
 		cs.statsHandler.HandleRPC(cs.statsCtx, end)
-	}
-	if err != nil && err != io.EOF {
-		cs.t.(channelz.ChannelCallCount).ParentCallFail()
-	} else {
-		cs.t.(channelz.ChannelCallCount).ParentCallSucceed()
 	}
 	if !cs.tracing {
 		return
@@ -656,6 +664,9 @@ func (ss *serverStream) SendMsg(m interface{}) (err error) {
 			st, _ := status.FromError(toRPCErr(err))
 			ss.t.WriteStatus(ss.s, st)
 		}
+		if err == nil || err == io.EOF {
+			ss.t.(channelz.Socket).IncrMsgSent()
+		}
 	}()
 	var outPayload *stats.OutPayload
 	if ss.statsHandler != nil {
@@ -695,6 +706,9 @@ func (ss *serverStream) RecvMsg(m interface{}) (err error) {
 		if err != nil && err != io.EOF {
 			st, _ := status.FromError(toRPCErr(err))
 			ss.t.WriteStatus(ss.s, st)
+		}
+		if err == nil || err == io.EOF {
+			ss.t.(channelz.Socket).IncrMsgRecv()
 		}
 	}()
 	var inPayload *stats.InPayload
