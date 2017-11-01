@@ -11,7 +11,8 @@ import (
 
 func init() {
 	channelTbl = &channelMap{
-		m: make(map[int64]conn),
+		m:                make(map[int64]conn),
+		topLevelChannels: make(map[int64]struct{}),
 	}
 	idGen = idGenerator{}
 
@@ -21,6 +22,7 @@ func init() {
 			fmt.Printf("######## %+v\n", channelTbl)
 			for k, v := range channelTbl.m {
 				// fmt.Printf("##  %+v, %+v\n", k, v)
+				fmt.Println("******************************************************")
 				if v.Type() == channelT {
 					fmt.Println("unique id:", k, "This is a channel. Info listed below")
 					fmt.Println("Connectivity state:", v.(*channel).c.GetState())
@@ -49,7 +51,12 @@ func init() {
 					fmt.Println("Remote flow control window:", v.(*socket).s.GetRemoteFlowControlWindow())
 					fmt.Printf("%+v\n", v)
 				} else {
-
+					fmt.Println("unique id:", k, "This is a server. Info listed below")
+					fmt.Println("Calls started:", v.(*server).s.GetCallsStarted())
+					fmt.Println("Calls succeeded:", v.(*server).s.GetCallsSucceeded())
+					fmt.Println("Calls failed:", v.(*server).s.GetCallsFailed())
+					fmt.Println("Last call started time:", v.(*server).s.GetLastCallStartedTime().String())
+					fmt.Printf("%+v\n", v)
 				}
 			}
 			fmt.Println("\n\n")
@@ -58,8 +65,9 @@ func init() {
 }
 
 type channelMap struct {
-	mu sync.Mutex
-	m  map[int64]conn
+	mu               sync.Mutex
+	m                map[int64]conn
+	topLevelChannels map[int64]struct{}
 }
 
 func (c *channelMap) Add(id int64, cn conn) {
@@ -68,9 +76,19 @@ func (c *channelMap) Add(id int64, cn conn) {
 	c.mu.Unlock()
 }
 
+func (c *channelMap) AddTopChannel(id int64, cn conn) {
+	c.mu.Lock()
+	c.m[id] = cn
+	c.topLevelChannels[id] = struct{}{}
+	c.mu.Unlock()
+}
+
 func (c *channelMap) Delete(id int64) {
 	c.mu.Lock()
 	delete(c.m, id)
+	if _, ok := c.topLevelChannels[id]; ok {
+		delete(c.topLevelChannels, id)
+	}
 	c.mu.Unlock()
 }
 
@@ -89,16 +107,24 @@ func (c *channelMap) Unlock() {
 	c.mu.Unlock()
 }
 
+func (c *channelMap) GetTopChannels() []int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	res := make([]int64, 0, len(c.topLevelChannels))
+	for k := range c.topLevelChannels {
+		res = append(res, k)
+	}
+	return res
+}
+
 var (
-	channelTbl       *channelMap
-	topLevelChannels []int64
-	idGen            idGenerator
+	channelTbl *channelMap
+	idGen      idGenerator
 )
 
 func RegisterTopChannel(c Channel) int64 {
-	id := RegisterChannel(c)
-	//TODO: locking?
-	topLevelChannels = append(topLevelChannels, id)
+	id := idGen.genID()
+	channelTbl.AddTopChannel(id, &channel{name: c.GetDesc(), c: c, children: make(map[int64]struct{})})
 	return id
 }
 
@@ -177,4 +203,8 @@ func (c *counter) decr() {
 
 func (c *counter) counter() int {
 	return int(atomic.LoadInt64(&c.c))
+}
+
+func GetTopChannels() []int64 {
+	return channelTbl.GetTopChannels()
 }

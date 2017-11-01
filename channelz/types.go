@@ -73,6 +73,10 @@ func (*socket) Type() EntryType {
 
 type Server interface {
 	GetDesc() string
+	GetCallsStarted() int64
+	GetLastCallStartedTime() time.Time
+	GetCallsSucceeded() int64
+	GetCallsFailed() int64
 }
 
 type server struct {

@@ -105,6 +105,11 @@ type Server struct {
 	done     chan struct{}
 	quitOnce sync.Once
 	doneOnce sync.Once
+
+	callsStarted        int64
+	callsFailed         int64
+	callsSucceeded      int64
+	lastCallStartedTime time.Time
 }
 
 type options struct {
@@ -355,6 +360,30 @@ func NewServer(opt ...ServerOption) *Server {
 
 func (s *Server) GetDesc() string {
 	return "this is a server"
+}
+
+func (s *Server) GetCallsStarted() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.callsStarted
+}
+
+func (s *Server) GetCallsFailed() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.callsFailed
+}
+
+func (s *Server) GetCallsSucceeded() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.callsSucceeded
+}
+
+func (s *Server) GetLastCallStartedTime() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastCallStartedTime
 }
 
 // printf records an event in s's event log, unless s has been stopped.
@@ -760,7 +789,36 @@ func (s *Server) sendResponse(t transport.ServerTransport, stream *transport.Str
 	return err
 }
 
+func (s *Server) incrCallsStarted() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.callsStarted++
+	s.lastCallStartedTime = time.Now()
+}
+
+func (s *Server) incrCallsFailed() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.callsStarted--
+	s.callsFailed++
+}
+
+func (s *Server) incrCallsSucceeded() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.callsStarted--
+	s.callsSucceeded++
+}
+
 func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.Stream, srv *service, md *MethodDesc, trInfo *traceInfo) (err error) {
+	s.incrCallsStarted()
+	defer func() {
+		if err != nil && err != io.EOF {
+			s.incrCallsFailed()
+		} else {
+			s.incrCallsSucceeded()
+		}
+	}()
 	sh := s.opts.statsHandler
 	if sh != nil {
 		begin := &stats.Begin{
@@ -859,6 +917,7 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 		}
 		return st.Err()
 	}
+	t.(channelz.Socket).IncrMsgRecv()
 	var inPayload *stats.InPayload
 	if sh != nil {
 		inPayload = &stats.InPayload{
@@ -954,6 +1013,7 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 	if trInfo != nil {
 		trInfo.tr.LazyLog(&payload{sent: true, msg: reply}, true)
 	}
+	t.(channelz.Socket).IncrMsgSent()
 	// TODO: Should we be logging if writing status failed here, like above?
 	// Should the logging be in WriteStatus?  Should we ignore the WriteStatus
 	// error or allow the stats handler to see it?
@@ -961,6 +1021,14 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 }
 
 func (s *Server) processStreamingRPC(t transport.ServerTransport, stream *transport.Stream, srv *service, sd *StreamDesc, trInfo *traceInfo) (err error) {
+	s.incrCallsStarted()
+	defer func() {
+		if err != nil && err != io.EOF {
+			s.incrCallsFailed()
+		} else {
+			s.incrCallsSucceeded()
+		}
+	}()
 	sh := s.opts.statsHandler
 	if sh != nil {
 		begin := &stats.Begin{

@@ -707,7 +707,7 @@ func (ss *serverStream) RecvMsg(m interface{}) (err error) {
 			st, _ := status.FromError(toRPCErr(err))
 			ss.t.WriteStatus(ss.s, st)
 		}
-		if err == nil || err == io.EOF {
+		if err == nil {
 			ss.t.(channelz.Socket).IncrMsgRecv()
 		}
 	}()
