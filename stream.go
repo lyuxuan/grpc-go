@@ -27,7 +27,7 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/net/trace"
 	"google.golang.org/grpc/balancer"
-	"google.golang.org/grpc/channelz"
+	channelz "google.golang.org/grpc/channelz/channelz_base"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/metadata"

@@ -31,7 +31,7 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
-	"google.golang.org/grpc/channelz"
+	channelz "google.golang.org/grpc/channelz/channelz_base"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
@@ -547,27 +547,54 @@ func (t *http2Client) NewStream(ctx context.Context, callHdr *CallHdr) (_ *Strea
 	return s, nil
 }
 
-func (t *http2Client) GetStreamsStarted() int64 {
+func (t *http2Client) ChannelzMetrics() channelz.SocketMetric {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.activeStreams == nil {
-		return 0
+	s := channelz.SocketMetric{
+		StreamsSucceeded:                t.streamsSucceeded,
+		StreamsFailed:                   t.streamsFailed,
+		MessagesSent:                    t.msgSent,
+		MessagesReceived:                t.msgRecv,
+		KeepAlivesSent:                  t.kpCount,
+		LastLocalStreamCreatedTimestamp: t.lastStreamCreated,
+		LastMessageSentTimestamp:        t.lastMsgSent,
+		LastMessageReceivedTimestamp:    t.lastMsgRecv,
+		LocalFlowControlWindow:          t.fc.GetInFlowWindow(),
+		RemoteFlowControlWindow:         t.sendQuotaPool.GetOutFlowWindow(),
+		//socket options
+		Local:  t.localAddr,
+		Remote: t.remoteAddr,
+		// Security
+		// RemoteName :
 	}
-	return int64(len(t.activeStreams))
+	if t.activeStreams != nil {
+		s.StreamsStarted = int64(len(t.activeStreams))
+	}
+	return s
 }
 
-func (t *http2Client) GetStreamsSucceeded() int64 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.streamsSucceeded
-}
-
-func (t *http2Client) GetStreamsFailed() int64 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.streamsFailed
-}
-
+//
+// func (t *http2Client) GetStreamsStarted() int64 {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	if t.activeStreams == nil {
+// 		return 0
+// 	}
+// 	return int64(len(t.activeStreams))
+// }
+//
+// func (t *http2Client) GetStreamsSucceeded() int64 {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	return t.streamsSucceeded
+// }
+//
+// func (t *http2Client) GetStreamsFailed() int64 {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	return t.streamsFailed
+// }
+//
 func (t *http2Client) IncrMsgSent() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -575,12 +602,13 @@ func (t *http2Client) IncrMsgSent() {
 	t.msgSent++
 }
 
-func (t *http2Client) GetMsgSent() int64 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.msgSent
-}
-
+//
+// func (t *http2Client) GetMsgSent() int64 {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	return t.msgSent
+// }
+//
 func (t *http2Client) IncrMsgRecv() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -588,47 +616,48 @@ func (t *http2Client) IncrMsgRecv() {
 	t.msgRecv++
 }
 
-func (t *http2Client) GetMsgRecv() int64 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.msgRecv
-}
-
-func (t *http2Client) GetKpCount() int64 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.kpCount
-}
-
-func (t *http2Client) GetLastStreamCreatedTime() time.Time {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.lastStreamCreated
-}
-
-func (t *http2Client) GetLastMsgSentTime() time.Time {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.lastMsgSent
-}
-
-func (t *http2Client) GetLastMsgRecvTime() time.Time {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.lastMsgRecv
-}
-
-func (t *http2Client) GetLocalFlowControlWindow() int64 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.fc.GetInFlowWindow()
-}
-
-func (t *http2Client) GetRemoteFlowControlWindow() int64 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.sendQuotaPool.GetOutFlowWindow()
-}
+//
+// func (t *http2Client) GetMsgRecv() int64 {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	return t.msgRecv
+// }
+//
+// func (t *http2Client) GetKpCount() int64 {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	return t.kpCount
+// }
+//
+// func (t *http2Client) GetLastStreamCreatedTime() time.Time {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	return t.lastStreamCreated
+// }
+//
+// func (t *http2Client) GetLastMsgSentTime() time.Time {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	return t.lastMsgSent
+// }
+//
+// func (t *http2Client) GetLastMsgRecvTime() time.Time {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	return t.lastMsgRecv
+// }
+//
+// func (t *http2Client) GetLocalFlowControlWindow() int64 {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	return t.fc.GetInFlowWindow()
+// }
+//
+// func (t *http2Client) GetRemoteFlowControlWindow() int64 {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	return t.sendQuotaPool.GetOutFlowWindow()
+// }
 
 // CloseStream clears the footprint of a stream when the stream is not needed any more.
 // This must not be executed in reader's goroutine.

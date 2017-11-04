@@ -37,7 +37,7 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/trace"
-	"google.golang.org/grpc/channelz"
+	channelz "google.golang.org/grpc/channelz/channelz_base"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/encoding"
@@ -358,33 +358,46 @@ func NewServer(opt ...ServerOption) *Server {
 	return s
 }
 
-func (s *Server) GetDesc() string {
-	return "this is a server"
-}
-
-func (s *Server) GetCallsStarted() int64 {
+func (s *Server) ChannelzMetrics() channelz.ServerMetric {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.callsStarted
+	return channelz.ServerMetric{
+		//  RefName                 string
+		CallsStarted:             s.callsStarted,
+		CallsSucceeded:           s.callsSucceeded,
+		CallsFailed:              s.callsFailed,
+		LastCallStartedTimestamp: s.lastCallStartedTime,
+		// trace
+	}
 }
 
-func (s *Server) GetCallsFailed() int64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.callsFailed
-}
-
-func (s *Server) GetCallsSucceeded() int64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.callsSucceeded
-}
-
-func (s *Server) GetLastCallStartedTime() time.Time {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.lastCallStartedTime
-}
+// func (s *Server) GetDesc() string {
+// 	return "this is a server"
+// }
+//
+// func (s *Server) GetCallsStarted() int64 {
+// 	s.mu.Lock()
+// 	defer s.mu.Unlock()
+// 	return s.callsStarted
+// }
+//
+// func (s *Server) GetCallsFailed() int64 {
+// 	s.mu.Lock()
+// 	defer s.mu.Unlock()
+// 	return s.callsFailed
+// }
+//
+// func (s *Server) GetCallsSucceeded() int64 {
+// 	s.mu.Lock()
+// 	defer s.mu.Unlock()
+// 	return s.callsSucceeded
+// }
+//
+// func (s *Server) GetLastCallStartedTime() time.Time {
+// 	s.mu.Lock()
+// 	defer s.mu.Unlock()
+// 	return s.lastCallStartedTime
+// }
 
 // printf records an event in s's event log, unless s has been stopped.
 // REQUIRES s.mu is held.

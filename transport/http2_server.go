@@ -35,7 +35,7 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
-	"google.golang.org/grpc/channelz"
+	channelz "google.golang.org/grpc/channelz/channelz_base"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
@@ -269,71 +269,97 @@ func newHTTP2Server(conn net.Conn, config *ServerConfig) (_ ServerTransport, err
 	return t, nil
 }
 
-func (t *http2Server) GetDesc() string {
-	return t.remoteAddr.String()
-}
-
-func (t *http2Server) GetMsgSent() int64 {
+func (t *http2Server) ChannelzMetrics() channelz.SocketMetric {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.msgSent
+	s := channelz.SocketMetric{
+		StreamsSucceeded:                t.streamsSucceeded,
+		StreamsFailed:                   t.streamsFailed,
+		MessagesSent:                    t.msgSent,
+		MessagesReceived:                t.msgRecv,
+		KeepAlivesSent:                  t.kpCount,
+		LastLocalStreamCreatedTimestamp: t.lastStreamCreated,
+		LastMessageSentTimestamp:        t.lastMsgSent,
+		LastMessageReceivedTimestamp:    t.lastMsgRecv,
+		LocalFlowControlWindow:          t.fc.GetInFlowWindow(),
+		RemoteFlowControlWindow:         t.sendQuotaPool.GetOutFlowWindow(),
+		//socket options
+		Local:  t.localAddr,
+		Remote: t.remoteAddr,
+		// Security
+		// RemoteName :
+	}
+	if t.activeStreams != nil {
+		s.StreamsStarted = int64(len(t.activeStreams))
+	}
+	return s
 }
 
-func (t *http2Server) GetMsgRecv() int64 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.msgRecv
-}
-
-func (t *http2Server) GetStreamsStarted() int64 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return int64(len(t.activeStreams))
-}
-
-func (t *http2Server) GetStreamsSucceeded() int64 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.streamsSucceeded
-}
-
-func (t *http2Server) GetStreamsFailed() int64 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.streamsFailed
-}
-
-func (t *http2Server) GetKpCount() int64 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.kpCount
-}
-
-func (t *http2Server) GetLastStreamCreatedTime() time.Time {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.lastStreamCreated
-}
-
-func (t *http2Server) GetLastMsgSentTime() time.Time {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.lastMsgSent
-}
-
-func (t *http2Server) GetLastMsgRecvTime() time.Time {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.lastMsgRecv
-}
-
-func (t *http2Server) GetLocalFlowControlWindow() int64 {
-	return t.fc.GetInFlowWindow()
-}
-
-func (t *http2Server) GetRemoteFlowControlWindow() int64 {
-	return t.sendQuotaPool.GetOutFlowWindow()
-}
+// func (t *http2Server) GetDesc() string {
+// 	return t.remoteAddr.String()
+// }
+//
+// func (t *http2Server) GetMsgSent() int64 {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	return t.msgSent
+// }
+//
+// func (t *http2Server) GetMsgRecv() int64 {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	return t.msgRecv
+// }
+//
+// func (t *http2Server) GetStreamsStarted() int64 {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	return int64(len(t.activeStreams))
+// }
+//
+// func (t *http2Server) GetStreamsSucceeded() int64 {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	return t.streamsSucceeded
+// }
+//
+// func (t *http2Server) GetStreamsFailed() int64 {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	return t.streamsFailed
+// }
+//
+// func (t *http2Server) GetKpCount() int64 {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	return t.kpCount
+// }
+//
+// func (t *http2Server) GetLastStreamCreatedTime() time.Time {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	return t.lastStreamCreated
+// }
+//
+// func (t *http2Server) GetLastMsgSentTime() time.Time {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	return t.lastMsgSent
+// }
+//
+// func (t *http2Server) GetLastMsgRecvTime() time.Time {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+// 	return t.lastMsgRecv
+// }
+//
+// func (t *http2Server) GetLocalFlowControlWindow() int64 {
+// 	return t.fc.GetInFlowWindow()
+// }
+//
+// func (t *http2Server) GetRemoteFlowControlWindow() int64 {
+// 	return t.sendQuotaPool.GetOutFlowWindow()
+// }
 
 func (t *http2Server) IncrMsgSent() {
 	t.mu.Lock()

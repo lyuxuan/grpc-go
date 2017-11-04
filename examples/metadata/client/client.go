@@ -10,7 +10,6 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/balancer"
-	_ "google.golang.org/grpc/channelz"
 	"google.golang.org/grpc/examples/metadata/helloworld"
 	"google.golang.org/grpc/metadata"
 )

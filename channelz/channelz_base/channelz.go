@@ -25,38 +25,13 @@ func init() {
 				fmt.Println("******************************************************")
 				if v.Type() == channelT {
 					fmt.Println("unique id:", k, "This is a channel. Info listed below")
-					fmt.Println("Connectivity state:", v.(*channel).c.GetState())
-					fmt.Println("Target:", v.(*channel).c.GetTarget())
-					// fmt.Println("Calls started:", v.(*channel).callsStarted)
-					fmt.Println("NEW** Calls started:", v.(*channel).c.GetCallsStarted())
-					// fmt.Println("Calls succeeded:", v.(*channel).callsSucceeded)
-					fmt.Println("NEW** Calls succeeded:", v.(*channel).c.GetCallsSucceeded())
-					// fmt.Println("Calls failed:", v.(*channel).callsFailed)
-					fmt.Println("NEW** Calls failed:", v.(*channel).c.GetCallsFailed())
-					// fmt.Println("Last call started time:", v.(*channel).lastCallStartedTime.String())
-					fmt.Println("NEW** Last call started time:", v.(*channel).c.GetLastCallStartedTime().String())
-					fmt.Printf("%+v\n", v)
+					fmt.Printf("%#+v\n", v.(*channel).c.ChannelzMetrics())
 				} else if v.Type() == socketT {
 					fmt.Println("unique id:", k, "This is a socket. Info listed below")
-					fmt.Println("Streams started:", v.(*socket).s.GetStreamsStarted())
-					fmt.Println("Streams succeeded:", v.(*socket).s.GetStreamsSucceeded())
-					fmt.Println("Streams failed:", v.(*socket).s.GetStreamsFailed())
-					fmt.Println("Msg sent:", v.(*socket).s.GetMsgSent())
-					fmt.Println("Msg recv:", v.(*socket).s.GetMsgRecv())
-					fmt.Println("Keepalives sent:", v.(*socket).s.GetKpCount())
-					fmt.Println("Last local stream created:", v.(*socket).s.GetLastStreamCreatedTime())
-					fmt.Println("Last msg sent:", v.(*socket).s.GetLastMsgSentTime())
-					fmt.Println("Last msg recv:", v.(*socket).s.GetLastMsgRecvTime())
-					fmt.Println("Local flow fontrol window:", v.(*socket).s.GetLocalFlowControlWindow())
-					fmt.Println("Remote flow control window:", v.(*socket).s.GetRemoteFlowControlWindow())
-					fmt.Printf("%+v\n", v)
+					fmt.Printf("%#+v\n", v.(*socket).s.ChannelzMetrics())
 				} else {
 					fmt.Println("unique id:", k, "This is a server. Info listed below")
-					fmt.Println("Calls started:", v.(*server).s.GetCallsStarted())
-					fmt.Println("Calls succeeded:", v.(*server).s.GetCallsSucceeded())
-					fmt.Println("Calls failed:", v.(*server).s.GetCallsFailed())
-					fmt.Println("Last call started time:", v.(*server).s.GetLastCallStartedTime().String())
-					fmt.Printf("%+v\n", v)
+					fmt.Printf("%#+v\n", v.(*server).s.ChannelzMetrics())
 				}
 			}
 			fmt.Println("\n\n")
@@ -124,25 +99,25 @@ var (
 
 func RegisterTopChannel(c Channel) int64 {
 	id := idGen.genID()
-	channelTbl.AddTopChannel(id, &channel{name: c.GetDesc(), c: c, children: make(map[int64]struct{})})
+	channelTbl.AddTopChannel(id, &channel{c: c, children: make(map[int64]struct{})})
 	return id
 }
 
 func RegisterChannel(c Channel) int64 {
 	id := idGen.genID()
-	channelTbl.Add(id, &channel{name: c.GetDesc(), c: c, children: make(map[int64]struct{})})
+	channelTbl.Add(id, &channel{c: c, children: make(map[int64]struct{})})
 	return id
 }
 
 func RegisterSocket(s Socket) int64 {
 	id := idGen.genID()
-	channelTbl.Add(id, &socket{name: s.GetDesc(), s: s})
+	channelTbl.Add(id, &socket{s: s})
 	return id
 }
 
 func RegisterServer(s Server) int64 {
 	id := idGen.genID()
-	channelTbl.Add(id, &server{name: s.GetDesc(), s: s})
+	channelTbl.Add(id, &server{s: s})
 	return id
 }
 
@@ -187,24 +162,4 @@ type idGenerator struct {
 
 func (i *idGenerator) genID() int64 {
 	return atomic.AddInt64(&i.id, 1)
-}
-
-type counter struct {
-	c int64
-}
-
-func (c *counter) incr() {
-	atomic.AddInt64(&c.c, 1)
-}
-
-func (c *counter) decr() {
-	atomic.AddInt64(&c.c, -1)
-}
-
-func (c *counter) counter() int {
-	return int(atomic.LoadInt64(&c.c))
-}
-
-func GetTopChannels() []int64 {
-	return channelTbl.GetTopChannels()
 }

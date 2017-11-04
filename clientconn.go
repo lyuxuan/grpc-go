@@ -33,7 +33,7 @@ import (
 	"golang.org/x/net/trace"
 	"google.golang.org/grpc/balancer"
 	_ "google.golang.org/grpc/balancer/roundrobin" // To register roundrobin.
-	"google.golang.org/grpc/channelz"
+	channelz "google.golang.org/grpc/channelz/channelz_base"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/grpclog"
@@ -732,9 +732,23 @@ func (cc *ClientConn) removeAddrConn(ac *addrConn, err error) {
 	channelz.RemoveEntry(ac.id)
 }
 
-func (cc *ClientConn) GetTarget() string {
-	return cc.target
+func (cc *ClientConn) ChannelzMetrics() channelz.ChannelMetric {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	return channelz.ChannelMetric{
+		State:                    cc.GetState(),
+		Target:                   cc.target,
+		CallsStarted:             cc.callsStarted,
+		CallsSucceeded:           cc.callsSucceeded,
+		CallsFailed:              cc.callsFailed,
+		LastCallStartedTimestamp: cc.lastCallStartedTime,
+	}
 }
+
+//
+// func (cc *ClientConn) GetTarget() string {
+// 	return cc.target
+// }
 
 func (cc *ClientConn) incrCallsStarted() {
 	cc.mu.Lock()
@@ -743,29 +757,29 @@ func (cc *ClientConn) incrCallsStarted() {
 	cc.lastCallStartedTime = time.Now()
 }
 
-func (cc *ClientConn) GetCallsStarted() int64 {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-	return cc.callsStarted
-}
-
-func (cc *ClientConn) GetLastCallStartedTime() time.Time {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-	return cc.lastCallStartedTime
-}
-
-func (cc *ClientConn) GetCallsSucceeded() int64 {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-	return cc.callsSucceeded
-}
-
-func (cc *ClientConn) GetCallsFailed() int64 {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-	return cc.callsFailed
-}
+// func (cc *ClientConn) GetCallsStarted() int64 {
+// 	cc.mu.Lock()
+// 	defer cc.mu.Unlock()
+// 	return cc.callsStarted
+// }
+//
+// func (cc *ClientConn) GetLastCallStartedTime() time.Time {
+// 	cc.mu.Lock()
+// 	defer cc.mu.Unlock()
+// 	return cc.lastCallStartedTime
+// }
+//
+// func (cc *ClientConn) GetCallsSucceeded() int64 {
+// 	cc.mu.Lock()
+// 	defer cc.mu.Unlock()
+// 	return cc.callsSucceeded
+// }
+//
+// func (cc *ClientConn) GetCallsFailed() int64 {
+// 	cc.mu.Lock()
+// 	defer cc.mu.Unlock()
+// 	return cc.callsFailed
+// }
 
 func (cc *ClientConn) incrCallsSucceeded() {
 	cc.mu.Lock()
@@ -1241,17 +1255,30 @@ func (ac *addrConn) tearDown(err error) {
 	return
 }
 
+func (ac *addrConn) ChannelzMetrics() channelz.ChannelMetric {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+	return channelz.ChannelMetric{
+		State:                    ac.state,
+		Target:                   ac.curAddr.Addr,
+		CallsStarted:             ac.callsStarted,
+		CallsSucceeded:           ac.callsSucceeded,
+		CallsFailed:              ac.callsFailed,
+		LastCallStartedTimestamp: ac.lastCallStartedTime,
+	}
+}
+
 func (ac *addrConn) GetState() connectivity.State {
 	ac.mu.Lock()
 	defer ac.mu.Unlock()
 	return ac.state
 }
 
-func (ac *addrConn) GetTarget() string {
-	ac.mu.Lock()
-	defer ac.mu.Unlock()
-	return ac.curAddr.Addr
-}
+// func (ac *addrConn) GetTarget() string {
+// 	ac.mu.Lock()
+// 	defer ac.mu.Unlock()
+// 	return ac.curAddr.Addr
+// }
 
 func (ac *addrConn) incrCallsStarted() {
 	ac.mu.Lock()
@@ -1274,30 +1301,31 @@ func (ac *addrConn) incrCallsFailed() {
 	ac.callsFailed++
 }
 
-func (ac *addrConn) GetCallsStarted() int64 {
-	ac.mu.Lock()
-	defer ac.mu.Unlock()
-	return ac.callsStarted
-}
-
-func (ac *addrConn) GetLastCallStartedTime() time.Time {
-	ac.mu.Lock()
-	defer ac.mu.Unlock()
-	return ac.lastCallStartedTime
-}
-
-func (ac *addrConn) GetCallsSucceeded() int64 {
-	ac.mu.Lock()
-	defer ac.mu.Unlock()
-	return ac.callsSucceeded
-}
-
-func (ac *addrConn) GetCallsFailed() int64 {
-	ac.mu.Lock()
-	defer ac.mu.Unlock()
-	return ac.callsFailed
-}
-
-func (ac *addrConn) GetDesc() string {
-	return "to be decided"
-}
+//
+// func (ac *addrConn) GetCallsStarted() int64 {
+// 	ac.mu.Lock()
+// 	defer ac.mu.Unlock()
+// 	return ac.callsStarted
+// }
+//
+// func (ac *addrConn) GetLastCallStartedTime() time.Time {
+// 	ac.mu.Lock()
+// 	defer ac.mu.Unlock()
+// 	return ac.lastCallStartedTime
+// }
+//
+// func (ac *addrConn) GetCallsSucceeded() int64 {
+// 	ac.mu.Lock()
+// 	defer ac.mu.Unlock()
+// 	return ac.callsSucceeded
+// }
+//
+// func (ac *addrConn) GetCallsFailed() int64 {
+// 	ac.mu.Lock()
+// 	defer ac.mu.Unlock()
+// 	return ac.callsFailed
+// }
+//
+// func (ac *addrConn) GetDesc() string {
+// 	return "to be decided"
+// }
