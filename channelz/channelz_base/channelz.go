@@ -13,25 +13,29 @@ func init() {
 	channelTbl = &channelMap{
 		m:                make(map[int64]conn),
 		topLevelChannels: make(map[int64]struct{}),
+		servers:          make(map[int64]struct{}),
+		orphans:          make(map[int64]struct{}),
 	}
 	idGen = idGenerator{}
 
 	go func() {
-		for i := 0; i < 15; i++ {
+		for i := 0; i < 20; i++ {
 			time.Sleep(time.Second)
 			fmt.Printf("######## %+v\n", channelTbl)
-			for k, v := range channelTbl.m {
+			for _, v := range channelTbl.m {
 				// fmt.Printf("##  %+v, %+v\n", k, v)
 				fmt.Println("******************************************************")
 				if v.Type() == channelT {
-					fmt.Println("unique id:", k, "This is a channel. Info listed below")
-					fmt.Printf("%#+v\n", v.(*channel).c.ChannelzMetrics())
+					// fmt.Println("unique id:", k, "This is a channel. Info listed below")
+					// fmt.Printf("%#+v\n", v.(*channel).c.ChannelzMetrics())
+					// fmt.Printf("children: %+v\n", v.(*channel).children)
 				} else if v.Type() == socketT {
-					fmt.Println("unique id:", k, "This is a socket. Info listed below")
-					fmt.Printf("%#+v\n", v.(*socket).s.ChannelzMetrics())
+					// fmt.Println("unique id:", k, "This is a socket. Info listed below")
+					// fmt.Printf("%#+v\n", v.(*socket).s.ChannelzMetrics())
 				} else {
-					fmt.Println("unique id:", k, "This is a server. Info listed below")
-					fmt.Printf("%#+v\n", v.(*server).s.ChannelzMetrics())
+					// fmt.Println("unique id:", k, "This is a server. Info listed below")
+					// fmt.Printf("%#+v\n", v.(*server).s.ChannelzMetrics())
+					// fmt.Printf("children: %+v\n", v.(*server).children)
 				}
 			}
 			fmt.Println("\n\n")
@@ -40,9 +44,11 @@ func init() {
 }
 
 type channelMap struct {
-	mu               sync.Mutex
+	mu               sync.RWMutex
 	m                map[int64]conn
 	topLevelChannels map[int64]struct{}
+	servers          map[int64]struct{}
+	orphans          map[int64]struct{}
 }
 
 func (c *channelMap) Add(id int64, cn conn) {
@@ -58,27 +64,79 @@ func (c *channelMap) AddTopChannel(id int64, cn conn) {
 	c.mu.Unlock()
 }
 
-func (c *channelMap) Delete(id int64) {
+func (c *channelMap) AddServer(id int64, cn conn) {
 	c.mu.Lock()
-	delete(c.m, id)
-	if _, ok := c.topLevelChannels[id]; ok {
-		delete(c.topLevelChannels, id)
-	}
+	c.m[id] = cn
+	c.servers[id] = struct{}{}
 	c.mu.Unlock()
 }
 
-func (c *channelMap) Value(id int64) (cn conn, ok bool) {
+func (c *channelMap) AddOrphan(id int64) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	cn, ok = c.m[id]
-	return
+	c.orphans[id] = struct{}{}
+	c.mu.Unlock()
 }
 
-func (c *channelMap) Lock() {
-	c.mu.Lock()
+func (c *channelMap) removeChild(pid, cid int64) {
+	e, ok := c.m[pid]
+	if !ok {
+		grpclog.Info("parent has been deleted.")
+		return
+	}
+	switch e.Type() {
+	case channelT:
+		delete(e.(*channel).children, cid)
+	case serverT:
+		delete(e.(*server).children, cid)
+	case socketT:
+		grpclog.Error("socket cannot have children")
+	}
 }
 
-func (c *channelMap) Unlock() {
+func (c *channelMap) Delete(id int64) {
+	c.mu.Lock()
+	if _, ok := c.topLevelChannels[id]; ok {
+		delete(c.topLevelChannels, id)
+		if v, ok := c.m[id]; ok {
+			if v.(*channel).children != nil && len(v.(*channel).children) > 0 {
+				for k := range v.(*channel).children {
+					c.orphans[k] = struct{}{}
+				}
+			}
+		} else {
+			grpclog.Errorf("Deleting an entity that doesn't exisit, id: %d", id)
+		}
+	}
+
+	if _, ok := c.servers[id]; ok {
+		delete(c.servers, id)
+		if v, ok := c.m[id]; ok {
+			if v.(*server).children != nil && len(v.(*server).children) > 0 {
+				for k := range v.(*server).children {
+					c.orphans[k] = struct{}{}
+				}
+			}
+		} else {
+			grpclog.Errorf("Deleting an entity that doesn't exisit, id: %d", id)
+		}
+	}
+
+	if _, ok := c.orphans[id]; ok {
+		delete(c.orphans, id)
+	}
+
+	if v, ok := c.m[id]; ok {
+		switch v.Type() {
+		case socketT:
+			c.removeChild(v.(*socket).pid, id)
+		case channelT:
+			if v.(*channel).pid != 0 {
+				c.removeChild(v.(*channel).pid, id)
+			}
+		default:
+		}
+	}
+	delete(c.m, id)
 	c.mu.Unlock()
 }
 
@@ -99,25 +157,26 @@ var (
 
 func RegisterTopChannel(c Channel) int64 {
 	id := idGen.genID()
-	channelTbl.AddTopChannel(id, &channel{c: c, children: make(map[int64]struct{})})
+	channelTbl.AddTopChannel(id, &channel{c: c, children: make(map[int64]string)})
 	return id
 }
 
 func RegisterChannel(c Channel) int64 {
 	id := idGen.genID()
-	channelTbl.Add(id, &channel{c: c, children: make(map[int64]struct{})})
+	channelTbl.Add(id, &channel{c: c, children: make(map[int64]string)})
 	return id
 }
 
 func RegisterSocket(s Socket) int64 {
 	id := idGen.genID()
+	s.SetID(id)
 	channelTbl.Add(id, &socket{s: s})
 	return id
 }
 
 func RegisterServer(s Server) int64 {
 	id := idGen.genID()
-	channelTbl.Add(id, &server{s: s})
+	channelTbl.AddServer(id, &server{s: s, children: make(map[int64]string)})
 	return id
 }
 
@@ -125,35 +184,45 @@ func RemoveEntry(id int64) {
 	channelTbl.Delete(id)
 }
 
-func AddChild(pid, cid int64) {
-	channelTbl.Lock()
-	defer channelTbl.Unlock()
-	c, ok := channelTbl.m[pid]
+func AddChild(pid, cid int64, ref string) {
+	channelTbl.mu.RLock()
+	defer channelTbl.mu.RUnlock()
+
+	// Add to parent's children set
+	p, ok := channelTbl.m[pid]
 	if !ok {
-		grpclog.Infof("parent has been deleted.")
+		grpclog.Infof("parent has been deleted, id %d", pid)
 		return
 	}
-	if c.Type() == channelT {
-		c.(*channel).children[cid] = struct{}{}
-	} else {
-		grpclog.Error("socket cannot have children")
-	}
-}
-
-func RemoveChild(pid, cid int64) {
-	channelTbl.Lock()
-	defer channelTbl.Unlock()
-
-	c, ok := channelTbl.m[pid]
-	if !ok {
-		grpclog.Info("parent has been deleted.")
+	p.Lock()
+	switch p.Type() {
+	case channelT:
+		p.(*channel).children[cid] = ref
+	case serverT:
+		p.(*server).children[cid] = ref
+	case socketT:
+		grpclog.Errorf("socket cannot have children, id: %d", pid)
 		return
 	}
-	if c.Type() == channelT {
-		delete(c.(*channel).children, cid)
-	} else {
-		grpclog.Error("socket cannot have children")
+	p.Unlock()
+
+	// Assign parent to child's parent
+	//TODO: should we delete child from parent children set if we found the child doesn't exist?
+	c, ok := channelTbl.m[cid]
+	if !ok {
+		grpclog.Infof("children does not exisit, id %d", cid)
+		return
 	}
+	c.Lock()
+	switch c.Type() {
+	case channelT:
+		channelTbl.m[cid].(*channel).pid = pid
+	case socketT:
+		channelTbl.m[cid].(*socket).pid = pid
+	case serverT:
+		grpclog.Infof("server cannot be a child, id: %d", cid)
+	}
+	c.Unlock()
 }
 
 type idGenerator struct {

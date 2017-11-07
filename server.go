@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -106,6 +107,7 @@ type Server struct {
 	quitOnce sync.Once
 	doneOnce sync.Once
 
+	id                  int64
 	callsStarted        int64
 	callsFailed         int64
 	callsSucceeded      int64
@@ -354,7 +356,7 @@ func NewServer(opt ...ServerOption) *Server {
 		_, file, line, _ := runtime.Caller(1)
 		s.events = trace.NewEventLog("grpc.Server", fmt.Sprintf("%s:%d", file, line))
 	}
-	channelz.RegisterServer(s)
+	s.id = channelz.RegisterServer(s)
 	return s
 }
 
@@ -651,6 +653,9 @@ func (s *Server) newHTTP2Transport(c net.Conn, authInfo credentials.AuthInfo) tr
 		st.Close()
 		return nil
 	}
+
+	id := channelz.RegisterSocket(st.(channelz.Socket))
+	channelz.AddChild(s.id, id, "socket "+strconv.FormatInt(id, 10))
 	return st
 }
 
@@ -1272,6 +1277,7 @@ func (s *Server) Stop() {
 		s.events.Finish()
 		s.events = nil
 	}
+	channelz.RemoveEntry(s.id)
 	s.mu.Unlock()
 }
 

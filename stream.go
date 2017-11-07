@@ -117,8 +117,6 @@ func newClientStream(ctx context.Context, desc *StreamDesc, cc *ClientConn, meth
 	defer func() {
 		if err != nil {
 			cc.incrCallsFailed()
-		} else {
-			cc.incrCallsSucceeded()
 		}
 	}()
 	var (

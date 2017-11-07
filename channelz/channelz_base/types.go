@@ -10,6 +10,7 @@ import (
 
 type conn interface {
 	Type() EntryType
+	sync.Locker
 }
 
 type EntryType int
@@ -38,11 +39,20 @@ type Channel interface {
 type channel struct {
 	c        Channel
 	mu       sync.Mutex
-	children map[int64]struct{}
+	children map[int64]string
+	pid      int64
 }
 
 func (*channel) Type() EntryType {
 	return channelT
+}
+
+func (c *channel) Lock() {
+	c.mu.Lock()
+}
+
+func (c *channel) Unlock() {
+	c.mu.Unlock()
 }
 
 type SocketMetric struct {
@@ -70,15 +80,23 @@ type Socket interface {
 	ChannelzMetrics() SocketMetric
 	IncrMsgSent()
 	IncrMsgRecv()
+	SetID(int64)
 }
 
 type socket struct {
 	name string
 	s    Socket
+	pid  int64
 }
 
 func (*socket) Type() EntryType {
 	return socketT
+}
+
+func (s *socket) Lock() {
+}
+
+func (s *socket) Unlock() {
 }
 
 type ServerMetric struct {
@@ -95,10 +113,20 @@ type Server interface {
 }
 
 type server struct {
-	name string
-	s    Server
+	name     string
+	s        Server
+	mu       sync.Mutex
+	children map[int64]string
 }
 
 func (*server) Type() EntryType {
 	return serverT
+}
+
+func (s *server) Lock() {
+	s.mu.Lock()
+}
+
+func (s *server) Unlock() {
+	s.mu.Unlock()
 }

@@ -120,10 +120,10 @@ func submain(wgg *sync.WaitGroup) {
 
 func main() {
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(1)
 	go submain(&wg)
-	go submain(&wg)
-	go submain(&wg)
+	// go submain(&wg)
+	// go submain(&wg)
 	wg.Wait()
 	time.Sleep(5 * time.Second)
 }

@@ -372,8 +372,7 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 
 		blockingpicker: newPickerWrapper(),
 	}
-	id := channelz.RegisterTopChannel(cc)
-	cc.id = id
+	cc.id = channelz.RegisterTopChannel(cc)
 	cc.ctx, cc.cancel = context.WithCancel(context.Background())
 
 	for _, opt := range opts {
@@ -713,7 +712,7 @@ func (cc *ClientConn) newAddrConn(addrs []resolver.Address) (*addrConn, error) {
 	}
 	cc.conns[ac] = struct{}{}
 	cc.mu.Unlock()
-	channelz.AddChild(cc.id, ac.id)
+	channelz.AddChild(cc.id, ac.id, "addr conn"+ac.curAddr.Addr)
 	return ac, nil
 }
 
@@ -728,7 +727,6 @@ func (cc *ClientConn) removeAddrConn(ac *addrConn, err error) {
 	delete(cc.conns, ac)
 	cc.mu.Unlock()
 	ac.tearDown(err)
-	channelz.RemoveChild(cc.id, ac.id)
 	channelz.RemoveEntry(ac.id)
 }
 
@@ -1072,7 +1070,7 @@ func (ac *addrConn) resetTransport() error {
 				continue
 			}
 			id := channelz.RegisterSocket(newTransport.(channelz.Socket))
-			channelz.AddChild(ac.id, id)
+			channelz.AddChild(ac.id, id, "socket "+strconv.FormatInt(id, 10))
 			ac.mu.Lock()
 			ac.printf("ready")
 			if ac.state == connectivity.Shutdown {

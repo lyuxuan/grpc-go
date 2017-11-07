@@ -96,6 +96,7 @@ type http2Server struct {
 
 	mu sync.Mutex // guard the following
 
+	id                int64
 	streamsSucceeded  int64
 	streamsFailed     int64
 	lastStreamCreated time.Time
@@ -265,7 +266,6 @@ func newHTTP2Server(conn net.Conn, config *ServerConfig) (_ ServerTransport, err
 		t.Close()
 	}()
 	go t.keepalive()
-	channelz.RegisterSocket(t)
 	return t, nil
 }
 
@@ -371,6 +371,12 @@ func (t *http2Server) IncrMsgRecv() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.msgRecv++
+}
+
+func (t *http2Server) SetID(id int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.id = id
 }
 
 // operateHeader takes action on the decoded headers.
@@ -1256,6 +1262,7 @@ func (t *http2Server) Close() error {
 		connEnd := &stats.ConnEnd{}
 		t.stats.HandleConn(t.ctx, connEnd)
 	}
+	channelz.RemoveEntry(t.id)
 	return err
 }
 

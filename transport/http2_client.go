@@ -82,8 +82,6 @@ type http2Client struct {
 
 	creds []credentials.PerRPCCredentials
 
-	chzID int64
-	pid   int64
 	// Boolean to keep track of reading activity on transport.
 	// 1 is true and 0 is false.
 	activity uint32 // Accessed atomically.
@@ -97,9 +95,11 @@ type http2Client struct {
 	bdpEst          *bdpEstimator
 	outQuotaVersion uint32
 
-	mu                sync.Mutex     // guard the following variables
-	state             transportState // the state of underlying connection
-	activeStreams     map[uint32]*Stream
+	mu            sync.Mutex     // guard the following variables
+	state         transportState // the state of underlying connection
+	activeStreams map[uint32]*Stream
+
+	id                int64
 	streamsSucceeded  int64
 	streamsFailed     int64
 	lastStreamCreated time.Time
@@ -321,15 +321,6 @@ func newHTTP2Client(ctx context.Context, addr TargetInfo, opts ConnectOptions, t
 
 func (t *http2Client) GetDesc() string {
 	return t.remoteAddr.String()
-}
-
-func (t *http2Client) SetIDs(pid, id int64) {
-	t.chzID = id
-	t.pid = pid
-}
-
-func (t *http2Client) GetIDs() (_, _ int64) {
-	return t.pid, t.chzID
 }
 
 func (t *http2Client) newStream(ctx context.Context, callHdr *CallHdr) *Stream {
@@ -616,6 +607,12 @@ func (t *http2Client) IncrMsgRecv() {
 	t.msgRecv++
 }
 
+func (t *http2Client) SetID(id int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.id = id
+}
+
 //
 // func (t *http2Client) GetMsgRecv() int64 {
 // 	t.mu.Lock()
@@ -754,8 +751,8 @@ func (t *http2Client) Close() error {
 		}
 		t.statsHandler.HandleConn(t.ctx, connEnd)
 	}
-	channelz.RemoveEntry(t.chzID)
-	channelz.RemoveChild(t.pid, t.chzID)
+
+	channelz.RemoveEntry(t.id)
 	return err
 }
 
