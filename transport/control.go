@@ -145,24 +145,10 @@ func newQuotaPool(q int) *quotaPool {
 	return qb
 }
 
-func (qb *quotaPool) GetOutFlowWindow() (res int64) {
+func (qb *quotaPool) GetOutFlowWindow() int64 {
 	qb.mu.Lock()
 	defer qb.mu.Unlock()
-	select {
-	case n := <-qb.c:
-		qb.quota += n
-	default:
-	}
-	res = int64(qb.quota)
-	if qb.quota <= 0 {
-		return
-	}
-	select {
-	case qb.c <- qb.quota:
-		qb.quota = 0
-	default:
-	}
-	return
+	return int64(qb.quota)
 }
 
 // add cancels the pending quota sent on acquired, incremented by v and sends

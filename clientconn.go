@@ -372,7 +372,6 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 
 		blockingpicker: newPickerWrapper(),
 	}
-	cc.id = channelz.RegisterTopChannel(cc)
 	cc.ctx, cc.cancel = context.WithCancel(context.Background())
 
 	for _, opt := range opts {
@@ -508,7 +507,7 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 			}
 		}
 	}
-
+	cc.id = channelz.RegisterTopChannel(cc)
 	return cc, nil
 }
 
