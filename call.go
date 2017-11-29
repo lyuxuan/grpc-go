@@ -336,7 +336,6 @@ func invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 			c.traceInfo.tr.LazyLog(&payload{sent: false, msg: reply}, true)
 		}
 		t.CloseStream(stream, nil)
-		err = stream.Status().Err()
 		if done != nil {
 			updateRPCInfoInContext(ctx, rpcInfo{
 				bytesSent:     true,

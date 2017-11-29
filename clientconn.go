@@ -373,6 +373,7 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 		blockingpicker: newPickerWrapper(),
 	}
 	cc.ctx, cc.cancel = context.WithCancel(context.Background())
+	cc.id = channelz.RegisterTopChannel(cc)
 
 	for _, opt := range opts {
 		opt(&cc.dopts)
@@ -507,7 +508,6 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 			}
 		}
 	}
-	cc.id = channelz.RegisterTopChannel(cc)
 	return cc, nil
 }
 
@@ -726,7 +726,6 @@ func (cc *ClientConn) removeAddrConn(ac *addrConn, err error) {
 	delete(cc.conns, ac)
 	cc.mu.Unlock()
 	ac.tearDown(err)
-	channelz.RemoveEntry(ac.id)
 }
 
 func (cc *ClientConn) ChannelzMetrics() channelz.ChannelMetric {
@@ -927,7 +926,6 @@ func (cc *ClientConn) Close() error {
 	}
 	for ac := range conns {
 		ac.tearDown(ErrClientConnClosing)
-		channelz.RemoveEntry(ac.id)
 	}
 	channelz.RemoveEntry(cc.id)
 	return nil
@@ -1249,6 +1247,7 @@ func (ac *addrConn) tearDown(err error) {
 		close(ac.ready)
 		ac.ready = nil
 	}
+	channelz.RemoveEntry(ac.id)
 	return
 }
 

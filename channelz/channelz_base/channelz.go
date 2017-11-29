@@ -22,20 +22,20 @@ func init() {
 		for i := 0; i < 20; i++ {
 			time.Sleep(time.Second)
 			fmt.Printf("######## %+v\n", channelTbl)
-			for _, v := range channelTbl.m {
+			for k, v := range channelTbl.m {
 				// fmt.Printf("##  %+v, %+v\n", k, v)
 				fmt.Println("******************************************************")
 				if v.Type() == channelT {
-					// fmt.Println("unique id:", k, "This is a channel. Info listed below")
-					// fmt.Printf("%#+v\n", v.(*channel).c.ChannelzMetrics())
-					// fmt.Printf("children: %+v\n", v.(*channel).children)
+					fmt.Println("unique id:", k, "This is a channel. Info listed below")
+					fmt.Printf("%#+v\n", v.(*channel).c.ChannelzMetrics())
+					fmt.Printf("children: %+v\n", v.(*channel).children)
 				} else if v.Type() == socketT {
-					// fmt.Println("unique id:", k, "This is a socket. Info listed below")
-					// fmt.Printf("%#+v\n", v.(*socket).s.ChannelzMetrics())
+					fmt.Println("unique id:", k, "This is a socket. Info listed below")
+					fmt.Printf("%#+v\n", v.(*socket).s.ChannelzMetrics())
 				} else {
-					// fmt.Println("unique id:", k, "This is a server. Info listed below")
-					// fmt.Printf("%#+v\n", v.(*server).s.ChannelzMetrics())
-					// fmt.Printf("children: %+v\n", v.(*server).children)
+					fmt.Println("unique id:", k, "This is a server. Info listed below")
+					fmt.Printf("%#+v\n", v.(*server).s.ChannelzMetrics())
+					fmt.Printf("children: %+v\n", v.(*server).children)
 				}
 			}
 			fmt.Println("\n\n")
