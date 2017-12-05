@@ -19,15 +19,21 @@
 package test
 
 import (
+	"context"
+	"fmt"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
+	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
 
 	"google.golang.org/grpc/channelz"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/resolver"
 	"google.golang.org/grpc/resolver/manual"
+	"google.golang.org/grpc/status"
 	testpb "google.golang.org/grpc/test/grpc_testing"
 	"google.golang.org/grpc/test/leakcheck"
 )
@@ -213,7 +219,6 @@ func TestCZClientSubChannelSocketRegistrationAndDeletion(t *testing.T) {
 	if count != num-1 {
 		t.Fatalf("There should be %d sockets not %d", num-1, count)
 	}
-
 }
 
 func TestCZServerSocketRegistrationAndDeletion(t *testing.T) {
@@ -347,4 +352,538 @@ func TestCZRecusivelyDeletionOfEntry(t *testing.T) {
 	if tcs != nil {
 		t.Fatalf("There should be no TopChannel entry")
 	}
+}
+
+func prettyPrintChannelMetric(c *channelz.ChannelMetric) {
+	if c == nil {
+		return
+	}
+	fmt.Println("{")
+	fmt.Printf("	ID: %+v\n", c.ID)
+	fmt.Printf("	RefName: %+v\n", c.RefName)
+	fmt.Printf("	State: %+v\n", c.State)
+	fmt.Printf("	Target: %+v\n", c.Target)
+	fmt.Printf("	CallsStarted: %+v\n", c.CallsStarted)
+	fmt.Printf("	CallsSucceeded: %+v\n", c.CallsSucceeded)
+	fmt.Printf("	CallsFailed: %+v\n", c.CallsFailed)
+	fmt.Printf("	LastCallStartedTimestamp: %+v\n", c.LastCallStartedTimestamp)
+	fmt.Printf("	NestedChans: %+v\n", c.NestedChans)
+	fmt.Printf("	SubChans: %+v\n", c.SubChans)
+	fmt.Printf("	Sockets: %+v\n", c.Sockets)
+	fmt.Println("}")
+}
+
+func TestCZClientConnAddrConnMetrics(t *testing.T) {
+	defer leakcheck.Check(t)
+	grpc.RegisterChannelz()
+	e := tcpClearRREnv
+	num := 3 // number of backends
+	te := newTest(t, e)
+	te.maxClientSendMsgSize = newInt(8)
+	var svrAddrs []resolver.Address
+	te.startServers(&testServer{security: e.security}, num)
+	r, cleanup := manual.GenerateAndRegisterManualResolver()
+	defer cleanup()
+	for _, a := range te.srvAddrs {
+		svrAddrs = append(svrAddrs, resolver.Address{Addr: a})
+	}
+	r.InitialAddrs(svrAddrs)
+	te.resolverScheme = r.Scheme()
+	cc := te.clientConn()
+	defer te.tearDown()
+	tc := testpb.NewTestServiceClient(cc)
+	if _, err := tc.EmptyCall(context.Background(), &testpb.Empty{}); err != nil {
+		t.Fatalf("TestService/EmptyCall(_, _) = _, %v, want _, <nil>", err)
+	}
+
+	const smallSize = 1
+	const largeSize = 8
+
+	largePayload, err := newPayload(testpb.PayloadType_COMPRESSABLE, largeSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &testpb.SimpleRequest{
+		ResponseType: testpb.PayloadType_COMPRESSABLE,
+		ResponseSize: int32(smallSize),
+		Payload:      largePayload,
+	}
+
+	if _, err := tc.UnaryCall(context.Background(), req); err == nil || status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("TestService/UnaryCall(_, _) = _, %v, want _, error code: %s", err, codes.ResourceExhausted)
+	}
+
+	stream, err := tc.FullDuplexCall(context.Background())
+	if err != nil {
+		t.Fatalf("%v.FullDuplexCall(_) = _, %v, want <nil>", tc, err)
+	}
+	defer stream.CloseSend()
+	// Here, we just wait for all sockets to be up. In the future, if we implement
+	// IDLE, we may need to make several rpc calls to create the sockets.
+	time.Sleep(100 * time.Millisecond)
+	tcs, _ := channelz.GetTopChannels(0)
+	if len(tcs) != 1 {
+		t.Fatalf("There should only be one top channel, not %d", len(tcs))
+	}
+	if len(tcs[0].SubChans) != num {
+		t.Fatalf("There should be %d subchannel not %d", num, len(tcs[0].SubChans))
+	}
+	var cst, csu, cf int64
+	for k := range tcs[0].SubChans {
+		sc := channelz.GetSubChannel(k)
+		if sc == nil {
+			t.Fatalf("got <nil> subchannel")
+		}
+		cst += sc.CallsStarted
+		csu += sc.CallsSucceeded
+		cf += sc.CallsFailed
+	}
+	if cst != 3 {
+		t.Fatalf("There should be 3 CallsStarted not %d", cst)
+	}
+	if csu != 1 {
+		t.Fatalf("There should be 1 CallsSucceeded not %d", csu)
+	}
+	if cf != 1 {
+		t.Fatalf("There should be 1 CallsFailed not %d", cf)
+	}
+	if tcs[0].CallsStarted != 3 {
+		t.Fatalf("There should be 3 CallsStarted not %d", tcs[0].CallsStarted)
+	}
+	if tcs[0].CallsSucceeded != 1 {
+		t.Fatalf("There should be 1 CallsSucceeded not %d", tcs[0].CallsSucceeded)
+	}
+	if tcs[0].CallsFailed != 1 {
+		t.Fatalf("There should be 1 CallsFailed not %d", tcs[0].CallsFailed)
+	}
+}
+
+func prettyPrintServerMetric(s *channelz.ServerMetric) {
+	if s == nil {
+		return
+	}
+	fmt.Println("{")
+	fmt.Printf("	ID: %+v\n", s.ID)
+	fmt.Printf("	RefName: %+v\n", s.RefName)
+	fmt.Printf("	CallsStarted: %+v\n", s.CallsStarted)
+	fmt.Printf("	CallsSucceeded: %+v\n", s.CallsSucceeded)
+	fmt.Printf("	CallsFailed: %+v\n", s.CallsFailed)
+	fmt.Printf("	LastCallStartedTimestamp: %+v\n", s.LastCallStartedTimestamp)
+	fmt.Printf("	Sockets: %+v\n", s.ListenSockets)
+	fmt.Println("}")
+}
+
+func TestCZServerMetrics(t *testing.T) {
+	defer leakcheck.Check(t)
+	grpc.RegisterChannelz()
+	e := tcpClearRREnv
+	te := newTest(t, e)
+	te.maxServerReceiveMsgSize = newInt(8)
+	te.startServer(&testServer{security: e.security})
+	defer te.tearDown()
+	cc := te.clientConn()
+	tc := testpb.NewTestServiceClient(cc)
+	if _, err := tc.EmptyCall(context.Background(), &testpb.Empty{}); err != nil {
+		t.Fatalf("TestService/EmptyCall(_, _) = _, %v, want _, <nil>", err)
+	}
+
+	const smallSize = 1
+	const largeSize = 8
+
+	largePayload, err := newPayload(testpb.PayloadType_COMPRESSABLE, largeSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &testpb.SimpleRequest{
+		ResponseType: testpb.PayloadType_COMPRESSABLE,
+		ResponseSize: int32(smallSize),
+		Payload:      largePayload,
+	}
+	if _, err := tc.UnaryCall(context.Background(), req); err == nil || status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("TestService/UnaryCall(_, _) = _, %v, want _, error code: %s", err, codes.ResourceExhausted)
+	}
+
+	stream, err := tc.FullDuplexCall(context.Background())
+	if err != nil {
+		t.Fatalf("%v.FullDuplexCall(_) = _, %v, want <nil>", tc, err)
+	}
+	defer stream.CloseSend()
+
+	time.Sleep(10 * time.Millisecond)
+	ss, _ := channelz.GetServers(0)
+	if len(ss) != 1 {
+		t.Fatalf("There should only be one server, not %d", len(ss))
+	}
+	if ss[0].CallsStarted != 3 {
+		t.Fatalf("There should be 3 CallsStarted not %d", ss[0].CallsStarted)
+	}
+	if ss[0].CallsSucceeded != 1 {
+		t.Fatalf("There should be 1 CallsSucceeded not %d", ss[0].CallsSucceeded)
+	}
+	if ss[0].CallsFailed != 1 {
+		t.Fatalf("There should be 1 CallsFailed not %d", ss[0].CallsFailed)
+	}
+}
+
+func prettyPrintSocketMetric(s *channelz.SocketMetric) {
+	if s == nil {
+		return
+	}
+	fmt.Println("{")
+	fmt.Printf("	ID: %+v\n", s.ID)
+	fmt.Printf("	RefName: %+v\n", s.RefName)
+	fmt.Printf("	StreamsStarted: %+v\n", s.StreamsStarted)
+	fmt.Printf("	StreamsSucceeded: %+v\n", s.StreamsSucceeded)
+	fmt.Printf("	StreamsFailed: %+v\n", s.StreamsFailed)
+	fmt.Printf("	MessagesSent: %+v\n", s.MessagesSent)
+	fmt.Printf("	MessagesReceived: %+v\n", s.MessagesReceived)
+	fmt.Printf("	KeepAlivesSent: %+v\n", s.KeepAlivesSent)
+	fmt.Printf("	LastLocalStreamCreatedTimestamp: %+v\n", s.LastLocalStreamCreatedTimestamp)
+	fmt.Printf("	LastRemoteStreamCreatedTimestamp: %+v\n", s.LastRemoteStreamCreatedTimestamp)
+	fmt.Printf("	LastMessageSentTimestamp: %+v\n", s.LastMessageSentTimestamp)
+	fmt.Printf("	LastMessageReceivedTimestamp: %+v\n", s.LastMessageReceivedTimestamp)
+	fmt.Printf("	LocalFlowControlWindow: %+v\n", s.LocalFlowControlWindow)
+	fmt.Printf("	RemoteFlowControlWindow: %+v\n", s.RemoteFlowControlWindow)
+	fmt.Printf("	Local: %+v\n", s.Local)
+	fmt.Printf("	Remote: %+v\n", s.Remote)
+	fmt.Printf("	RemoteName: %+v\n", s.RemoteName)
+	fmt.Println("}")
+}
+
+type testServiceClientWrapper struct {
+	testpb.TestServiceClient
+	mu             sync.RWMutex
+	streamsCreated int
+}
+
+func (t *testServiceClientWrapper) getCurrentStreamID() uint32 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return uint32(2*t.streamsCreated - 1)
+}
+
+func (t *testServiceClientWrapper) EmptyCall(ctx context.Context, in *testpb.Empty, opts ...grpc.CallOption) (*testpb.Empty, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.streamsCreated++
+	return t.TestServiceClient.EmptyCall(ctx, in, opts...)
+}
+
+func (t *testServiceClientWrapper) UnaryCall(ctx context.Context, in *testpb.SimpleRequest, opts ...grpc.CallOption) (*testpb.SimpleResponse, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.streamsCreated++
+	return t.TestServiceClient.UnaryCall(ctx, in, opts...)
+}
+
+func (t *testServiceClientWrapper) StreamingOutputCall(ctx context.Context, in *testpb.StreamingOutputCallRequest, opts ...grpc.CallOption) (testpb.TestService_StreamingOutputCallClient, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.streamsCreated++
+	return t.TestServiceClient.StreamingOutputCall(ctx, in, opts...)
+}
+
+func (t *testServiceClientWrapper) StreamingInputCall(ctx context.Context, opts ...grpc.CallOption) (testpb.TestService_StreamingInputCallClient, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.streamsCreated++
+	return t.TestServiceClient.StreamingInputCall(ctx, opts...)
+}
+
+func (t *testServiceClientWrapper) FullDuplexCall(ctx context.Context, opts ...grpc.CallOption) (testpb.TestService_FullDuplexCallClient, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.streamsCreated++
+	return t.TestServiceClient.FullDuplexCall(ctx, opts...)
+}
+
+func (t *testServiceClientWrapper) HalfDuplexCall(ctx context.Context, opts ...grpc.CallOption) (testpb.TestService_HalfDuplexCallClient, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.streamsCreated++
+	return t.TestServiceClient.HalfDuplexCall(ctx, opts...)
+}
+
+func doSuccessfulUnaryCall(tc testpb.TestServiceClient, t *testing.T) {
+	if _, err := tc.EmptyCall(context.Background(), &testpb.Empty{}); err != nil {
+		t.Fatalf("TestService/EmptyCall(_, _) = _, %v, want _, <nil>", err)
+	}
+}
+
+func doServerSideFailedUnaryCall(tc testpb.TestServiceClient, t *testing.T) {
+	const smallSize = 1
+	const largeSize = 2000
+
+	largePayload, err := newPayload(testpb.PayloadType_COMPRESSABLE, largeSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &testpb.SimpleRequest{
+		ResponseType: testpb.PayloadType_COMPRESSABLE,
+		ResponseSize: int32(smallSize),
+		Payload:      largePayload,
+	}
+	if _, err := tc.UnaryCall(context.Background(), req); err == nil || status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("TestService/UnaryCall(_, _) = _, %v, want _, error code: %s", err, codes.ResourceExhausted)
+	}
+}
+
+func doClientSideFailedUnaryCall(tc testpb.TestServiceClient, t *testing.T) {
+	const smallSize = 1
+	const largeSize = 2000
+
+	smallPayload, err := newPayload(testpb.PayloadType_COMPRESSABLE, smallSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &testpb.SimpleRequest{
+		ResponseType: testpb.PayloadType_COMPRESSABLE,
+		ResponseSize: int32(largeSize),
+		Payload:      smallPayload,
+	}
+	if _, err := tc.UnaryCall(context.Background(), req); err == nil || status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("TestService/UnaryCall(_, _) = _, %v, want _, error code: %s", err, codes.ResourceExhausted)
+	}
+}
+
+func doClientSideInitiatedFailedStream(tc testpb.TestServiceClient, t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, err := tc.FullDuplexCall(ctx)
+	if err != nil {
+		t.Fatalf("TestService/FullDuplexCall(_) = _, %v, want <nil>", err)
+	}
+
+	const smallSize = 1
+	smallPayload, err := newPayload(testpb.PayloadType_COMPRESSABLE, smallSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sreq := &testpb.StreamingOutputCallRequest{
+		ResponseType: testpb.PayloadType_COMPRESSABLE,
+		ResponseParameters: []*testpb.ResponseParameters{
+			{Size: smallSize},
+		},
+		Payload: smallPayload,
+	}
+
+	for i := 0; i < 3; i++ {
+		if err := stream.Send(sreq); err != nil {
+			t.Fatalf("%v.Send(%v) = %v, want <nil>", stream, sreq, err)
+		}
+		if _, err := stream.Recv(); err != nil {
+			t.Fatalf("%v.Recv() = %v, want <nil>", stream, err)
+		}
+	}
+	// by canceling the call, the client will send rst_stream to end the call, and
+	// the stream will failed as a result.
+	cancel()
+}
+
+// this func is to be used to test client side counting of failed streams.
+func doServerSideInitiatedFailedStreamWithRSTStream(tc testpb.TestServiceClient, t *testing.T, l *Listener) {
+	stream, err := tc.FullDuplexCall(context.Background())
+	if err != nil {
+		t.Fatalf("TestService/FullDuplexCall(_) = _, %v, want <nil>", err)
+	}
+
+	const smallSize = 1
+	smallPayload, err := newPayload(testpb.PayloadType_COMPRESSABLE, smallSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sreq := &testpb.StreamingOutputCallRequest{
+		ResponseType: testpb.PayloadType_COMPRESSABLE,
+		ResponseParameters: []*testpb.ResponseParameters{
+			{Size: smallSize},
+		},
+		Payload: smallPayload,
+	}
+
+	for i := 0; i < 3; i++ {
+		if err := stream.Send(sreq); err != nil {
+			t.Fatalf("%v.Send(%v) = %v, want <nil>", stream, sreq, err)
+		}
+		if _, err := stream.Recv(); err != nil {
+			t.Fatalf("%v.Recv() = %v, want <nil>", stream, err)
+		}
+	}
+
+	rcw := l.getLastConn()
+
+	if rcw != nil {
+		rcw.writeRSTStream(tc.(*testServiceClientWrapper).getCurrentStreamID(), http2.ErrCodeCancel)
+	}
+}
+
+// this func is to be used to test client side counting of failed streams.
+func doServerSideInitiatedFailedStreamWithGoAway(tc testpb.TestServiceClient, t *testing.T, l *Listener) {
+	// This call is just to keep the transport from shutting down (socket will be deleted
+	// in this case, and we will not be able to get metrics).
+	_, err := tc.FullDuplexCall(context.Background())
+	if err != nil {
+		t.Fatalf("TestService/FullDuplexCall(_) = _, %v, want <nil>", err)
+	}
+
+	_, err = tc.FullDuplexCall(context.Background())
+	if err != nil {
+		t.Fatalf("TestService/FullDuplexCall(_) = _, %v, want <nil>", err)
+	}
+
+	rcw := l.getLastConn()
+	if rcw != nil {
+		rcw.WriteGoAway(tc.(*testServiceClientWrapper).getCurrentStreamID()-2, http2.ErrCodeCancel, []byte{})
+	}
+}
+
+// this func is to be used to test client side counting of failed streams.
+func doServerSideInitiatedFailedStreamWithClientBreakFlowControl(tc testpb.TestServiceClient, t *testing.T, dw *dialerWrapper) {
+	stream, err := tc.FullDuplexCall(context.Background())
+	if err != nil {
+		t.Fatalf("TestService/FullDuplexCall(_) = _, %v, want <nil>", err)
+	}
+	const smallSize = 1
+	smallPayload, err := newPayload(testpb.PayloadType_COMPRESSABLE, smallSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sreq := &testpb.StreamingOutputCallRequest{
+		ResponseType: testpb.PayloadType_COMPRESSABLE,
+		ResponseParameters: []*testpb.ResponseParameters{
+			{Size: smallSize},
+		},
+		Payload: smallPayload,
+	}
+
+	if err := stream.Send(sreq); err != nil {
+		t.Fatalf("%v.Send(%v) = %v, want <nil>", stream, sreq, err)
+	}
+
+	payload := make([]byte, 4, 4)
+	dw.getRawConnWrapper().WriteRawFrame(http2.FrameWindowUpdate, 0, tc.(*testServiceClientWrapper).getCurrentStreamID(), payload)
+}
+
+func TestCZClientSocketMetrics(t *testing.T) {
+	defer leakcheck.Check(t)
+	grpc.RegisterChannelz()
+	e := tcpClearRREnv
+	te := newTest(t, e)
+	te.maxServerReceiveMsgSize = newInt(20)
+	te.maxClientReceiveMsgSize = newInt(20)
+	rcw := te.startServerWithConnControl(&testServer{security: e.security})
+	defer te.tearDown()
+	cc, dw := te.clientConnWithConnControl()
+	tc := &testServiceClientWrapper{TestServiceClient: testpb.NewTestServiceClient(cc)}
+	doSuccessfulUnaryCall(tc, t)
+
+	time.Sleep(10 * time.Millisecond)
+	tchan, _ := channelz.GetTopChannels(0)
+	if len(tchan) != 1 {
+		t.Fatalf("There should only be one top channel, not %d", len(tchan))
+	}
+	if len(tchan[0].SubChans) != 1 {
+		t.Fatalf("There should only be one subchannel under top channel %d, not %d", tchan[0].ID, len(tchan[0].SubChans))
+	}
+	var id int64
+	for id = range tchan[0].SubChans {
+		break
+	}
+	sc := channelz.GetSubChannel(id)
+	if sc == nil {
+		t.Fatalf("There should only be one socket under subchannel %d, not 0", id)
+	}
+	if len(sc.Sockets) != 1 {
+		t.Fatalf("There should only be one socket under subchannel %d, not %d", sc.ID, len(sc.Sockets))
+	}
+	for id = range sc.Sockets {
+		break
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	skt := channelz.GetSocket(id)
+	prettyPrintSocketMetric(skt)
+
+	doServerSideFailedUnaryCall(tc, t)
+	time.Sleep(10 * time.Millisecond)
+	skt = channelz.GetSocket(id)
+	prettyPrintSocketMetric(skt)
+
+	doClientSideFailedUnaryCall(tc, t)
+	time.Sleep(10 * time.Millisecond)
+	skt = channelz.GetSocket(id)
+	prettyPrintSocketMetric(skt)
+
+	doClientSideInitiatedFailedStream(tc, t)
+	time.Sleep(10 * time.Millisecond)
+	skt = channelz.GetSocket(id)
+	prettyPrintSocketMetric(skt)
+
+	doServerSideInitiatedFailedStreamWithRSTStream(tc, t, rcw)
+	time.Sleep(10 * time.Millisecond)
+	skt = channelz.GetSocket(id)
+	prettyPrintSocketMetric(skt)
+
+	doServerSideInitiatedFailedStreamWithClientBreakFlowControl(tc, t, dw)
+	time.Sleep(10 * time.Millisecond)
+	skt = channelz.GetSocket(id)
+	prettyPrintSocketMetric(skt)
+
+	doServerSideInitiatedFailedStreamWithGoAway(tc, t, rcw)
+	time.Sleep(10 * time.Millisecond)
+	skt = channelz.GetSocket(id)
+	prettyPrintSocketMetric(skt)
+}
+
+func TestCZServerSocketMetrics(t *testing.T) {
+	defer leakcheck.Check(t)
+	grpc.RegisterChannelz()
+	e := tcpClearRREnv
+	te := newTest(t, e)
+	te.maxServerReceiveMsgSize = newInt(20)
+	te.maxClientReceiveMsgSize = newInt(20)
+	te.startServer(&testServer{security: e.security})
+	defer te.tearDown()
+	cc, dw := te.clientConnWithConnControl()
+	tc := &testServiceClientWrapper{TestServiceClient: testpb.NewTestServiceClient(cc)}
+	ss, _ := channelz.GetServers(0)
+	if len(ss) != 1 {
+		t.Fatalf("There should only be one server, not %d", len(ss))
+	}
+
+	doSuccessfulUnaryCall(tc, t)
+	time.Sleep(10 * time.Millisecond)
+	ns, _ := channelz.GetServerSockets(ss[0].ID, 0)
+	prettyPrintSocketMetric(ns[0])
+
+	doServerSideFailedUnaryCall(tc, t)
+	time.Sleep(10 * time.Millisecond)
+	ns, _ = channelz.GetServerSockets(ss[0].ID, 0)
+	prettyPrintSocketMetric(ns[0])
+
+	doClientSideFailedUnaryCall(tc, t)
+	time.Sleep(10 * time.Millisecond)
+	ns, _ = channelz.GetServerSockets(ss[0].ID, 0)
+	prettyPrintSocketMetric(ns[0])
+
+	doClientSideInitiatedFailedStream(tc, t)
+	time.Sleep(10 * time.Millisecond)
+	ns, _ = channelz.GetServerSockets(ss[0].ID, 0)
+	prettyPrintSocketMetric(ns[0])
+
+	// doServerSideInitiatedFailedStreamWithRSTStream(tc, t, rcw)
+	// time.Sleep(10 * time.Millisecond)
+	// ns, _ = channelz.GetServerSockets(ss[0].ID, 0)
+	// prettyPrintSocketMetric(ns[0])
+
+	// doServerSideInitiatedFailedStreamWithGoAway(tc, t, rcw)
+	// time.Sleep(10 * time.Millisecond)
+	// ns, _ = channelz.GetServerSockets(ss[0].ID, 0)
+	// prettyPrintSocketMetric(ns[0])
+
+	doServerSideInitiatedFailedStreamWithClientBreakFlowControl(tc, t, dw)
+	time.Sleep(10 * time.Millisecond)
+	ns, _ = channelz.GetServerSockets(ss[0].ID, 0)
+	prettyPrintSocketMetric(ns[0])
 }

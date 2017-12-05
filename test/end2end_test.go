@@ -495,6 +495,7 @@ func (te *test) tearDown() {
 		te.cc.Close()
 		te.cc = nil
 	}
+
 	if te.restoreLogs != nil {
 		te.restoreLogs()
 		te.restoreLogs = nil
@@ -520,6 +521,139 @@ func newTest(t *testing.T, e env) *test {
 	}
 	te.ctx, te.cancel = context.WithCancel(context.Background())
 	return te
+}
+
+type Listener struct {
+	net.Listener
+	mu    sync.Mutex
+	conns []*rawConnWrapper
+}
+
+func Listen(network, address string) (*Listener, error) {
+	l, err := net.Listen(network, address)
+	if err != nil {
+		return nil, err
+	}
+	return &Listener{Listener: l}, nil
+}
+
+// Accept blocks until Dial is called, then returns a net.Conn for the server
+// half of the connection.
+func (l *Listener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	l.mu.Lock()
+	l.conns = append(l.conns, newRawConnWrapperFromConn(c))
+	l.mu.Unlock()
+	return c, nil
+}
+
+// Close stops the listener.
+func (l *Listener) Close() error {
+	return l.Listener.Close()
+}
+
+func (l *Listener) getLastConn() *rawConnWrapper {
+	l.mu.Lock()
+	if len(l.conns) == 0 {
+		l.mu.Unlock()
+		return nil
+	}
+	rcw := l.conns[len(l.conns)-1]
+	l.mu.Unlock()
+	return rcw
+}
+
+// Addr reports the address of the listener.
+func (l *Listener) Addr() net.Addr { return l.Listener.Addr() }
+
+func (te *test) startServerWithConnControl(ts testpb.TestServiceServer) *Listener {
+	te.testServer = ts
+	te.t.Logf("Running test in %s environment...", te.e.name)
+	sopts := []grpc.ServerOption{grpc.MaxConcurrentStreams(te.maxStream)}
+	if te.maxMsgSize != nil {
+		sopts = append(sopts, grpc.MaxMsgSize(*te.maxMsgSize))
+	}
+	if te.maxServerReceiveMsgSize != nil {
+		sopts = append(sopts, grpc.MaxRecvMsgSize(*te.maxServerReceiveMsgSize))
+	}
+	if te.maxServerSendMsgSize != nil {
+		sopts = append(sopts, grpc.MaxSendMsgSize(*te.maxServerSendMsgSize))
+	}
+	if te.tapHandle != nil {
+		sopts = append(sopts, grpc.InTapHandle(te.tapHandle))
+	}
+	if te.serverCompression {
+		sopts = append(sopts,
+			grpc.RPCCompressor(grpc.NewGZIPCompressor()),
+			grpc.RPCDecompressor(grpc.NewGZIPDecompressor()),
+		)
+	}
+	if te.unaryServerInt != nil {
+		sopts = append(sopts, grpc.UnaryInterceptor(te.unaryServerInt))
+	}
+	if te.streamServerInt != nil {
+		sopts = append(sopts, grpc.StreamInterceptor(te.streamServerInt))
+	}
+	if te.unknownHandler != nil {
+		sopts = append(sopts, grpc.UnknownServiceHandler(te.unknownHandler))
+	}
+	if te.serverInitialWindowSize > 0 {
+		sopts = append(sopts, grpc.InitialWindowSize(te.serverInitialWindowSize))
+	}
+	if te.serverInitialConnWindowSize > 0 {
+		sopts = append(sopts, grpc.InitialConnWindowSize(te.serverInitialConnWindowSize))
+	}
+	la := "localhost:0"
+	switch te.e.network {
+	case "unix":
+		la = "/tmp/testsock" + fmt.Sprintf("%d", time.Now().UnixNano())
+		syscall.Unlink(la)
+	}
+	lis, err := Listen(te.e.network, la)
+	if err != nil {
+		te.t.Fatalf("Failed to listen: %v", err)
+	}
+	switch te.e.security {
+	case "tls":
+		creds, err := credentials.NewServerTLSFromFile(testdata.Path("server1.pem"), testdata.Path("server1.key"))
+		if err != nil {
+			te.t.Fatalf("Failed to generate credentials %v", err)
+		}
+		sopts = append(sopts, grpc.Creds(creds))
+	case "clientTimeoutCreds":
+		sopts = append(sopts, grpc.Creds(&clientTimeoutCreds{}))
+	}
+	if te.customCodec != nil {
+		sopts = append(sopts, grpc.CustomCodec(te.customCodec))
+	}
+	s := grpc.NewServer(sopts...)
+	te.srv = s
+	if te.e.httpHandler {
+		internal.TestingUseHandlerImpl(s)
+	}
+	if te.healthServer != nil {
+		healthpb.RegisterHealthServer(s, te.healthServer)
+	}
+	if te.testServer != nil {
+		testpb.RegisterTestServiceServer(s, te.testServer)
+	}
+	addr := la
+	switch te.e.network {
+	case "unix":
+	default:
+		_, port, err := net.SplitHostPort(lis.Addr().String())
+		if err != nil {
+			te.t.Fatalf("Failed to parse listener address: %v", err)
+		}
+		addr = "localhost:" + port
+	}
+
+	go s.Serve(lis)
+	te.srvAddr = addr
+	return lis
 }
 
 // startServer starts a gRPC server listening. Callers should defer a
@@ -634,6 +768,121 @@ func NewNopDecompressor() grpc.Decompressor {
 
 func (d *nopDecompressor) Type() string {
 	return "nop"
+}
+
+type dialerWrapper struct {
+	c   net.Conn
+	rcw *rawConnWrapper
+}
+
+func (d *dialerWrapper) dialer(target string, t time.Duration) (net.Conn, error) {
+	c, err := net.DialTimeout("tcp", target, t)
+	d.c = c
+	d.rcw = newRawConnWrapperFromConn(c)
+	return c, err
+}
+
+func (d *dialerWrapper) getRawConnWrapper() *rawConnWrapper {
+	return d.rcw
+}
+
+func (te *test) clientConnWithConnControl() (*grpc.ClientConn, *dialerWrapper) {
+	if te.cc != nil {
+		return te.cc, nil
+	}
+	opts := []grpc.DialOption{
+		grpc.WithDialer(te.e.dialer),
+		grpc.WithUserAgent(te.userAgent),
+	}
+
+	if te.sc != nil {
+		opts = append(opts, grpc.WithServiceConfig(te.sc))
+	}
+
+	if te.clientCompression {
+		opts = append(opts,
+			grpc.WithCompressor(grpc.NewGZIPCompressor()),
+			grpc.WithDecompressor(grpc.NewGZIPDecompressor()),
+		)
+	}
+	if te.clientUseCompression {
+		opts = append(opts, grpc.WithDefaultCallOptions(grpc.UseCompressor("gzip")))
+	}
+	if te.clientNopCompression {
+		opts = append(opts,
+			grpc.WithCompressor(NewNopCompressor()),
+			grpc.WithDecompressor(NewNopDecompressor()),
+		)
+	}
+	if te.unaryClientInt != nil {
+		opts = append(opts, grpc.WithUnaryInterceptor(te.unaryClientInt))
+	}
+	if te.streamClientInt != nil {
+		opts = append(opts, grpc.WithStreamInterceptor(te.streamClientInt))
+	}
+	if te.maxMsgSize != nil {
+		opts = append(opts, grpc.WithMaxMsgSize(*te.maxMsgSize))
+	}
+	if te.maxClientReceiveMsgSize != nil {
+		opts = append(opts, grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(*te.maxClientReceiveMsgSize)))
+	}
+	if te.maxClientSendMsgSize != nil {
+		opts = append(opts, grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(*te.maxClientSendMsgSize)))
+	}
+	switch te.e.security {
+	case "tls":
+		creds, err := credentials.NewClientTLSFromFile(testdata.Path("ca.pem"), "x.test.youtube.com")
+		if err != nil {
+			te.t.Fatalf("Failed to load credentials: %v", err)
+		}
+		opts = append(opts, grpc.WithTransportCredentials(creds))
+	case "clientTimeoutCreds":
+		opts = append(opts, grpc.WithTransportCredentials(&clientTimeoutCreds{}))
+	default:
+		opts = append(opts, grpc.WithInsecure())
+	}
+	// TODO(bar) switch balancer case "pick_first".
+	var scheme string
+	if te.resolverScheme == "" {
+		scheme = "passthrough:///"
+	} else {
+		scheme = te.resolverScheme + ":///"
+	}
+	switch te.e.balancer {
+	case "v1":
+		opts = append(opts, grpc.WithBalancer(grpc.RoundRobin(nil)))
+	case "round_robin":
+		opts = append(opts, grpc.WithBalancerName(roundrobin.Name))
+	}
+	if te.clientInitialWindowSize > 0 {
+		opts = append(opts, grpc.WithInitialWindowSize(te.clientInitialWindowSize))
+	}
+	if te.clientInitialConnWindowSize > 0 {
+		opts = append(opts, grpc.WithInitialConnWindowSize(te.clientInitialConnWindowSize))
+	}
+	if te.perRPCCreds != nil {
+		opts = append(opts, grpc.WithPerRPCCredentials(te.perRPCCreds))
+	}
+	if te.customCodec != nil {
+		opts = append(opts, grpc.WithCodec(te.customCodec))
+	}
+	if !te.nonBlockingDial && te.srvAddr != "" {
+		// Only do a blocking dial if server is up.
+		opts = append(opts, grpc.WithBlock())
+	}
+	if te.srvAddr == "" {
+		te.srvAddr = "client.side.only.test"
+	}
+	opts = append(opts, te.customDialOptions...)
+	dw := &dialerWrapper{}
+	// overwrite the dialer before
+	opts = append(opts, grpc.WithDialer(dw.dialer))
+	var err error
+	te.cc, err = grpc.Dial(scheme+te.srvAddr, opts...)
+	if err != nil {
+		te.t.Fatalf("Dial(%q) = %v", scheme+te.srvAddr, err)
+	}
+	return te.cc, dw
 }
 
 func (te *test) clientConn() *grpc.ClientConn {
