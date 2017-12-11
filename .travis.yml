@@ -19,4 +19,4 @@ before_install:
 script:
   - if [[ -n "$RUN386" ]]; then export GOARCH=386; fi
   - if [[ "$TRAVIS_GO_VERSION" = 1.9* && "$GOARCH" != "386" ]]; then ./vet.sh || exit 1; fi
-  - if [[ "$GOARCH" != "386" ]]; then go test -race -cpu 1,4 -timeout  google.golang.org/grpc/test/... -run TestServiceConfigTimeoutTD -count 1000; fi
+  - if [[ "$GOARCH" != "386" ]]; then make testrace; fi
