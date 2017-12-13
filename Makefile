@@ -26,7 +26,7 @@ test: testdeps
 	go test -cpu 1,4 -timeout 5m google.golang.org/grpc/...
 
 testrace: testdeps
-	 go test -race -cpu 1,4 -timeout 60m google.golang.org/grpc/test... -run TestFlowControlLogicalRace -count 1000
+	 go test -race -cpu 1,4 google.golang.org/grpc/test... -run TestFlowControlLogicalRace -count 1000
 
 clean:
 	go clean -i google.golang.org/grpc/...
