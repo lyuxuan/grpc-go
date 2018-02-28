@@ -19,6 +19,7 @@
 package channelz
 
 import (
+	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -78,6 +79,14 @@ func NewChannelzStorage() {
 		servers:          make(map[int64]struct{}),
 	})
 	idGen.reset()
+}
+
+func PrintMap() {
+	fmt.Println("{")
+	for k, v := range db.get().entries {
+		fmt.Printf("%d, type: %#v\n", k, v.Type())
+	}
+	fmt.Println("}")
 }
 
 // GetTopChannels returns up to EntryPerPage number of top channel metric whose
@@ -596,11 +605,13 @@ func (c *channelMap) GetSocket(id int64) *SocketMetric {
 	var cn entry
 	var ok bool
 	c.mu.RLock()
-	if cn, ok = c.entries[id]; !ok || cn.Type() != NormalSocketT || cn.Type() != ListenSocketT {
+	cn, ok = c.entries[id]
+	if cn, ok = c.entries[id]; !ok || (cn.Type() != NormalSocketT && cn.Type() != ListenSocketT) {
 		// socket with id doesn't exist.
 		c.mu.RUnlock()
 		return nil
 	}
+	c.mu.RUnlock()
 	return cn.(*socket).s.ChannelzMetric()
 }
 

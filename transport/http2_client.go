@@ -933,6 +933,7 @@ func (t *http2Client) handleRSTStream(f *http2.RSTStreamFrame) {
 	if !ok {
 		return
 	}
+
 	s.mu.Lock()
 	if s.state == streamDone {
 		s.mu.Unlock()
@@ -942,7 +943,6 @@ func (t *http2Client) handleRSTStream(f *http2.RSTStreamFrame) {
 		close(s.headerChan)
 		s.headerDone = true
 	}
-
 	code := http2.ErrCode(f.ErrCode)
 	if code == http2.ErrCodeRefusedStream {
 		// The stream was unprocessed by the server.

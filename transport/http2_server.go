@@ -307,7 +307,6 @@ func (t *http2Server) operateHeaders(frame *http2.MetaHeadersFrame, handle func(
 		method:         state.method,
 		contentSubtype: state.contentSubtype,
 	}
-
 	if frame.StreamEnded() {
 		// s is just created by the caller. No lock needed.
 		s.state = streamReadDone
@@ -418,19 +417,15 @@ func (t *http2Server) operateHeaders(frame *http2.MetaHeadersFrame, handle func(
 func (t *http2Server) HandleStreams(handle func(*Stream), traceCtx func(context.Context, string) context.Context) {
 	for {
 		frame, err := t.framer.fr.ReadFrame()
-		fmt.Println(t.activeStreams)
 		atomic.StoreUint32(&t.activity, 1)
 		if err != nil {
 			if se, ok := err.(http2.StreamError); ok {
 				t.mu.Lock()
-				fmt.Println(se.StreamID, t.activeStreams)
 				s := t.activeStreams[se.StreamID]
 				t.mu.Unlock()
 				if s != nil {
-					fmt.Println("ccc")
 					t.closeStream(s, false)
 				}
-				fmt.Println("llslsl")
 				t.controlBuf.put(&resetStream{se.StreamID, se.Code})
 				continue
 			}
@@ -1195,7 +1190,6 @@ func (t *http2Server) Close() error {
 // any more.
 func (t *http2Server) closeStream(s *Stream, succeeded bool) {
 	t.mu.Lock()
-	fmt.Println("close stream")
 	delete(t.activeStreams, s.id)
 	if len(t.activeStreams) == 0 {
 		t.idle = time.Now()
