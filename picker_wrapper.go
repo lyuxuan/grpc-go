@@ -59,12 +59,15 @@ func (bp *pickerWrapper) updatePicker(p balancer.Picker) {
 }
 
 func doneWrapper(acw *acBalancerWrapper, done func(balancer.DoneInfo)) func(balancer.DoneInfo) {
-	acw.ac.incrCallsStarted()
+	acw.mu.Lock()
+	ac := acw.ac
+	acw.mu.Unlock()
+	ac.incrCallsStarted()
 	return func(b balancer.DoneInfo) {
 		if b.Err != nil && b.Err != io.EOF {
-			acw.ac.incrCallsFailed()
+			ac.incrCallsFailed()
 		} else {
-			acw.ac.incrCallsSucceeded()
+			ac.incrCallsSucceeded()
 		}
 		if done != nil {
 			done(b)
