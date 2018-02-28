@@ -72,6 +72,7 @@ type ChannelMetric struct {
 // that reports ChannelMetric.
 type Channel interface {
 	ChannelzMetric() *ChannelMetric
+	SetChannelzID(id int64)
 }
 
 type channel struct {
@@ -123,6 +124,7 @@ type SocketMetric struct {
 // Socket is the interface implemented by transport.http2Client and transport.http2Server.
 type Socket interface {
 	ChannelzMetric() *SocketMetric
+	SetChannelzID(id int64)
 }
 
 type socket struct {
@@ -158,6 +160,7 @@ type ServerMetric struct {
 // Server is the interface implemented by grpc.Server that reports ServerMetric.
 type Server interface {
 	ChannelzMetric() *ServerMetric
+	SetChannelzID(id int64)
 }
 
 type server struct {

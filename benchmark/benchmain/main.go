@@ -300,6 +300,9 @@ func init() {
 		kbps = []int{network.Kbps}
 		mtu = []int{network.MTU}
 	}
+
+	// TODO(yuxuanli): for benchmarking convenience, delete before PR is merged.
+	grpc.RegisterChannelz()
 }
 
 func setMode(name string) []bool {

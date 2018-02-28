@@ -433,9 +433,9 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 
 	if channelz.IsOn() {
 		if cc.dopts.channelzParentID != 0 {
-			cc.channelzID = channelz.RegisterChannel(cc, channelz.NestedChannelT, cc.dopts.channelzParentID, "")
+			channelz.RegisterChannel(cc, channelz.NestedChannelT, cc.dopts.channelzParentID, "")
 		} else {
-			cc.channelzID = channelz.RegisterChannel(cc, channelz.TopChannelT, 0, "")
+			channelz.RegisterChannel(cc, channelz.TopChannelT, 0, "")
 		}
 	}
 
@@ -810,7 +810,7 @@ func (cc *ClientConn) newAddrConn(addrs []resolver.Address) (*addrConn, error) {
 		return nil, ErrClientConnClosing
 	}
 	if channelz.IsOn() {
-		ac.channelzID = channelz.RegisterChannel(ac, channelz.SubChannelT, cc.channelzID, "")
+		channelz.RegisterChannel(ac, channelz.SubChannelT, cc.channelzID, "")
 	}
 	cc.conns[ac] = struct{}{}
 	cc.mu.Unlock()
@@ -866,6 +866,15 @@ func (cc *ClientConn) incrCallsFailed() {
 	cc.czmu.Lock()
 	cc.callsFailed++
 	cc.czmu.Unlock()
+}
+
+// SetChannelzID sets the channelzID field.
+// This function should not be used by grpc user.
+// This is an EXPERIMENTAL API.
+func (cc *ClientConn) SetChannelzID(id int64) {
+	// no lock is needed here, since SetChannelzID is guaranteed to be called before
+	// channelzID field is accessed.
+	cc.channelzID = id
 }
 
 // connect starts to creating transport and also starts the transport monitor
@@ -1468,12 +1477,11 @@ func (ac *addrConn) getState() connectivity.State {
 	return ac.state
 }
 
-// ErrClientConnTimeout indicates that the ClientConn cannot establish the
-// underlying connections within the specified timeout.
-//
-// Deprecated: This error is never returned by grpc and should not be
-// referenced by users.
-var ErrClientConnTimeout = errors.New("grpc: timed out when dialing")
+func (ac *addrConn) SetChannelzID(id int64) {
+	// no lock is needed here, since SetChannelzID is guaranteed to be called before
+	// channelzID field is accessed.
+	ac.channelzID = id
+}
 
 func (ac *addrConn) ChannelzMetric() *channelz.ChannelMetric {
 	ac.mu.Lock()
@@ -1512,3 +1520,10 @@ func (ac *addrConn) incrCallsFailed() {
 	ac.callsFailed++
 	ac.czmu.Unlock()
 }
+
+// ErrClientConnTimeout indicates that the ClientConn cannot establish the
+// underlying connections within the specified timeout.
+//
+// Deprecated: This error is never returned by grpc and should not be
+// referenced by users.
+var ErrClientConnTimeout = errors.New("grpc: timed out when dialing")

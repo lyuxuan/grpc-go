@@ -130,8 +130,13 @@ func GetSocket(id int64) *SocketMetric {
 // as its reference name, and sets parent ID to be pid. zero-value pid means no
 // parent.
 // This is an EXPERIMENTAL API.
-func RegisterChannel(c Channel, t EntryType, pid int64, ref string) int64 {
+func RegisterChannel(c Channel, t EntryType, pid int64, ref string) {
+	if t != TopChannelT && t != SubChannelT && t != NestedChannelT {
+		grpclog.Errorf("register channel with invalid type %+v", t)
+		return
+	}
 	id := idGen.genID()
+	c.SetChannelzID(id)
 	cn := &channel{
 		c:           c,
 		subChans:    make(map[int64]string),
@@ -148,31 +153,33 @@ func RegisterChannel(c Channel, t EntryType, pid int64, ref string) int64 {
 	case NestedChannelT:
 		cn.t = NestedChannelT
 		db.get().addNonRootEntry(id, cn)
-	default:
-		grpclog.Errorf("register channel with undefined type %+v", t)
-		// Is returning 0 a good idea?
-		return 0
 	}
 
 	if pid != 0 {
 		db.get().addChildToParent(pid, id, ref)
 	}
-	return id
+	return
 }
 
 // RegisterServer registers the given server in db.
 // This is an EXPERIMENTAL API.
-func RegisterServer(s Server) int64 {
+func RegisterServer(s Server) {
 	id := idGen.genID()
+	s.SetChannelzID(id)
 	db.get().addServer(id, &server{s: s, sockets: make(map[int64]string), listenSockets: make(map[int64]string)})
-	return id
+	return
 }
 
 // RegisterSocket registers the given socket in db as EntryType t, with ref as
 // its reference name, and sets pid as its parent ID.
 // This is an EXPERIMENTAL API.
-func RegisterSocket(s Socket, t EntryType, pid int64, ref string) int64 {
+func RegisterSocket(s Socket, t EntryType, pid int64, ref string) {
+	if t != NormalSocketT && t != ListenSocketT {
+		grpclog.Errorf("register socket with invalid type %+v", t)
+		return
+	}
 	id := idGen.genID()
+	s.SetChannelzID(id)
 	sk := &socket{s: s}
 	switch t {
 	case NormalSocketT:
@@ -181,16 +188,12 @@ func RegisterSocket(s Socket, t EntryType, pid int64, ref string) int64 {
 	case ListenSocketT:
 		sk.t = ListenSocketT
 		db.get().addNonRootEntry(id, sk)
-	default:
-		grpclog.Errorf("register socket with undefined type %+v", t)
-		// Is returning 0 a good idea?
-		return 0
 	}
 
 	if pid != 0 {
 		db.get().addChildToParent(pid, id, ref)
 	}
-	return id
+	return
 }
 
 // RemoveEntry removes an entry with unique identification number id from db.

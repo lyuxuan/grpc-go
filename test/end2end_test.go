@@ -508,7 +508,6 @@ func (te *test) tearDown() {
 	if te.srv != nil {
 		te.srv.Stop()
 	}
-
 	if len(te.srvs) != 0 {
 		for _, s := range te.srvs {
 			s.Stop()
