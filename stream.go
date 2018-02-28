@@ -27,6 +27,7 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/net/trace"
 	"google.golang.org/grpc/balancer"
+	"google.golang.org/grpc/channelz"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/metadata"
@@ -114,6 +115,14 @@ func NewClientStream(ctx context.Context, desc *StreamDesc, cc *ClientConn, meth
 }
 
 func newClientStream(ctx context.Context, desc *StreamDesc, cc *ClientConn, method string, opts ...CallOption) (_ ClientStream, err error) {
+	if channelz.IsOn() {
+		cc.incrCallsStarted()
+		defer func() {
+			if err != nil {
+				cc.incrCallsFailed()
+			}
+		}()
+	}
 	c := defaultCallInfo()
 	mc := cc.GetMethodConfig(method)
 	if mc.WaitForReady != nil {
@@ -263,6 +272,7 @@ func newClientStream(ctx context.Context, desc *StreamDesc, cc *ClientConn, meth
 	cs := &clientStream{
 		opts:   opts,
 		c:      c,
+		cc:     cc,
 		desc:   desc,
 		codec:  c.codec,
 		cp:     cp,
@@ -303,6 +313,7 @@ func newClientStream(ctx context.Context, desc *StreamDesc, cc *ClientConn, meth
 type clientStream struct {
 	opts []CallOption
 	c    *callInfo
+	cc   *ClientConn
 	t    transport.ClientTransport
 	s    *transport.Stream
 	p    *parser
@@ -400,6 +411,9 @@ func (cs *clientStream) SendMsg(m interface{}) (err error) {
 			outPayload.SentTime = time.Now()
 			cs.statsHandler.HandleRPC(cs.statsCtx, outPayload)
 		}
+		if channelz.IsOn() {
+			cs.t.IncrMsgSent()
+		}
 		return nil
 	}
 	return io.EOF
@@ -454,6 +468,9 @@ func (cs *clientStream) RecvMsg(m interface{}) (err error) {
 	if inPayload != nil {
 		cs.statsHandler.HandleRPC(cs.statsCtx, inPayload)
 	}
+	if channelz.IsOn() {
+		cs.t.IncrMsgRecv()
+	}
 	if cs.desc.ServerStreams {
 		// Subsequent messages should be received by subsequent RecvMsg calls.
 		return nil
@@ -506,6 +523,11 @@ func (cs *clientStream) finish(err error) {
 			BytesReceived: cs.s.BytesReceived(),
 		})
 		cs.done = nil
+	}
+	if err != nil {
+		cs.cc.incrCallsFailed()
+	} else {
+		cs.cc.incrCallsSucceeded()
 	}
 	if cs.statsHandler != nil {
 		end := &stats.End{
@@ -612,6 +634,9 @@ func (ss *serverStream) SendMsg(m interface{}) (err error) {
 			st, _ := status.FromError(toRPCErr(err))
 			ss.t.WriteStatus(ss.s, st)
 		}
+		if channelz.IsOn() && err == nil {
+			ss.t.IncrMsgSent()
+		}
 	}()
 	var outPayload *stats.OutPayload
 	if ss.statsHandler != nil {
@@ -651,6 +676,9 @@ func (ss *serverStream) RecvMsg(m interface{}) (err error) {
 		if err != nil && err != io.EOF {
 			st, _ := status.FromError(toRPCErr(err))
 			ss.t.WriteStatus(ss.s, st)
+		}
+		if channelz.IsOn() && err == nil {
+			ss.t.IncrMsgRecv()
 		}
 	}()
 	var inPayload *stats.InPayload

@@ -37,6 +37,8 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/trace"
+
+	"google.golang.org/grpc/channelz"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/encoding"
@@ -102,6 +104,13 @@ type Server struct {
 	quitOnce sync.Once
 	doneOnce sync.Once
 	serveWG  sync.WaitGroup // counts active Serve goroutines for GracefulStop
+
+	channelzID          int64 // channelz unique identification number
+	czmu                sync.RWMutex
+	callsStarted        int64
+	callsFailed         int64
+	callsSucceeded      int64
+	lastCallStartedTime time.Time
 }
 
 type options struct {
@@ -343,6 +352,10 @@ func NewServer(opt ...ServerOption) *Server {
 		_, file, line, _ := runtime.Caller(1)
 		s.events = trace.NewEventLog("grpc.Server", fmt.Sprintf("%s:%d", file, line))
 	}
+
+	if channelz.IsOn() {
+		s.channelzID = channelz.RegisterServer(s)
+	}
 	return s
 }
 
@@ -458,6 +471,23 @@ func (s *Server) useTransportAuthenticator(rawConn net.Conn) (net.Conn, credenti
 	return s.opts.creds.ServerHandshake(rawConn)
 }
 
+type listenSocket struct {
+	net.Listener
+	channelzID int64
+}
+
+func (l *listenSocket) ChannelzMetric() *channelz.SocketMetric {
+	return &channelz.SocketMetric{}
+}
+
+func (l *listenSocket) Close() error {
+	err := l.Listener.Close()
+	if channelz.IsOn() {
+		channelz.RemoveEntry(l.channelzID)
+	}
+	return err
+}
+
 // Serve accepts incoming connections on the listener lis, creating a new
 // ServerTransport and service goroutine for each. The service goroutines
 // read gRPC requests and then call the registered handlers to reply to them.
@@ -486,13 +516,19 @@ func (s *Server) Serve(lis net.Listener) error {
 		}
 	}()
 
-	s.lis[lis] = true
+	ls := &listenSocket{Listener: lis}
+	s.lis[ls] = true
+
+	if channelz.IsOn() {
+		ls.channelzID = channelz.RegisterSocket(ls, channelz.ListenSocketT, s.channelzID, "")
+	}
 	s.mu.Unlock()
+
 	defer func() {
 		s.mu.Lock()
-		if s.lis != nil && s.lis[lis] {
-			lis.Close()
-			delete(s.lis, lis)
+		if s.lis != nil && s.lis[ls] {
+			ls.Close()
+			delete(s.lis, ls)
 		}
 		s.mu.Unlock()
 	}()
@@ -614,6 +650,7 @@ func (s *Server) newHTTP2Transport(c net.Conn, authInfo credentials.AuthInfo) tr
 		InitialConnWindowSize: s.opts.initialConnWindowSize,
 		WriteBufferSize:       s.opts.writeBufferSize,
 		ReadBufferSize:        s.opts.readBufferSize,
+		ChannelzParentID:      s.channelzID,
 	}
 	st, err := transport.NewServerTransport("http2", c, config)
 	if err != nil {
@@ -624,6 +661,7 @@ func (s *Server) newHTTP2Transport(c net.Conn, authInfo credentials.AuthInfo) tr
 		grpclog.Warningln("grpc: Server.Serve failed to create ServerTransport: ", err)
 		return nil
 	}
+
 	return st
 }
 
@@ -751,6 +789,40 @@ func (s *Server) removeConn(c io.Closer) {
 	}
 }
 
+// ChannelzMetric returns ServerMetric of current server.
+// This is an EXPERIMENTAL API.
+func (s *Server) ChannelzMetric() *channelz.ServerMetric {
+	s.czmu.RLock()
+	defer s.czmu.RUnlock()
+	return &channelz.ServerMetric{
+		ID:                       s.channelzID,
+		RefName:                  "",
+		CallsStarted:             s.callsStarted,
+		CallsSucceeded:           s.callsSucceeded,
+		CallsFailed:              s.callsFailed,
+		LastCallStartedTimestamp: s.lastCallStartedTime,
+	}
+}
+
+func (s *Server) incrCallsStarted() {
+	s.czmu.Lock()
+	s.callsStarted++
+	s.lastCallStartedTime = time.Now()
+	s.czmu.Unlock()
+}
+
+func (s *Server) incrCallsSucceeded() {
+	s.czmu.Lock()
+	s.callsSucceeded++
+	s.czmu.Unlock()
+}
+
+func (s *Server) incrCallsFailed() {
+	s.czmu.Lock()
+	s.callsFailed++
+	s.czmu.Unlock()
+}
+
 func (s *Server) sendResponse(t transport.ServerTransport, stream *transport.Stream, msg interface{}, cp Compressor, opts *transport.Options, comp encoding.Compressor) error {
 	var (
 		outPayload *stats.OutPayload
@@ -775,6 +847,16 @@ func (s *Server) sendResponse(t transport.ServerTransport, stream *transport.Str
 }
 
 func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.Stream, srv *service, md *MethodDesc, trInfo *traceInfo) (err error) {
+	if channelz.IsOn() {
+		s.incrCallsStarted()
+		defer func() {
+			if err != nil && err != io.EOF {
+				s.incrCallsFailed()
+			} else {
+				s.incrCallsSucceeded()
+			}
+		}()
+	}
 	sh := s.opts.statsHandler
 	if sh != nil {
 		begin := &stats.Begin{
@@ -867,6 +949,9 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 		}
 		return err
 	}
+	if channelz.IsOn() {
+		t.IncrMsgRecv()
+	}
 	if st := checkRecvPayload(pf, stream.RecvCompress(), dc != nil || decomp != nil); st != nil {
 		if e := t.WriteStatus(stream, st); e != nil {
 			grpclog.Warningf("grpc: Server.processUnaryRPC failed to write status %v", e)
@@ -941,7 +1026,6 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 		Last:  true,
 		Delay: false,
 	}
-
 	if err := s.sendResponse(t, stream, reply, cp, opts, comp); err != nil {
 		if err == io.EOF {
 			// The entire stream is done (for unary RPC only).
@@ -965,6 +1049,9 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 		}
 		return err
 	}
+	if channelz.IsOn() {
+		t.IncrMsgSent()
+	}
 	if trInfo != nil {
 		trInfo.tr.LazyLog(&payload{sent: true, msg: reply}, true)
 	}
@@ -975,6 +1062,16 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 }
 
 func (s *Server) processStreamingRPC(t transport.ServerTransport, stream *transport.Stream, srv *service, sd *StreamDesc, trInfo *traceInfo) (err error) {
+	if channelz.IsOn() {
+		s.incrCallsStarted()
+		defer func() {
+			if err != nil && err != io.EOF {
+				s.incrCallsFailed()
+			} else {
+				s.incrCallsSucceeded()
+			}
+		}()
+	}
 	sh := s.opts.statsHandler
 	if sh != nil {
 		begin := &stats.Begin{
@@ -1184,7 +1281,13 @@ func (s *Server) Stop() {
 		})
 	}()
 
+	if channelz.IsOn() {
+		channelz.RemoveEntry(s.channelzID)
+	}
 	s.mu.Lock()
+	if channelz.IsOn() {
+		channelz.RemoveEntry(s.channelzID)
+	}
 	listeners := s.lis
 	s.lis = nil
 	st := s.conns
@@ -1222,11 +1325,15 @@ func (s *Server) GracefulStop() {
 		})
 	}()
 
+	if channelz.IsOn() {
+		channelz.RemoveEntry(s.channelzID)
+	}
 	s.mu.Lock()
 	if s.conns == nil {
 		s.mu.Unlock()
 		return
 	}
+
 	for lis := range s.lis {
 		lis.Close()
 	}

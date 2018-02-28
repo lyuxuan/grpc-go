@@ -32,6 +32,7 @@ import (
 	"golang.org/x/net/trace"
 	"google.golang.org/grpc/balancer"
 	_ "google.golang.org/grpc/balancer/roundrobin" // To register roundrobin.
+	"google.golang.org/grpc/channelz"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
@@ -101,12 +102,19 @@ type dialOptions struct {
 	// This is to support grpclb.
 	resolverBuilder  resolver.Builder
 	waitForHandshake bool
+	channelzParentID int64
 }
 
 const (
 	defaultClientMaxReceiveMessageSize = 1024 * 1024 * 4
 	defaultClientMaxSendMessageSize    = math.MaxInt32
 )
+
+// RegisterChannelz turns on channelz service.
+// This is an EXPERIMENTAL API.
+func RegisterChannelz() {
+	channelz.TurnOn()
+}
 
 // DialOption configures how we set up the connection.
 type DialOption func(*dialOptions)
@@ -388,6 +396,14 @@ func WithAuthority(a string) DialOption {
 	}
 }
 
+// WithChannelzParentID returns a DialOption that specifies the channelz ID of current ClientConn's
+// parent. This function is used in nested channel creation (e.g. grpclb dial).
+func WithChannelzParentID(id int64) DialOption {
+	return func(o *dialOptions) {
+		o.channelzParentID = id
+	}
+}
+
 // Dial creates a client connection to the given target.
 func Dial(target string, opts ...DialOption) (*ClientConn, error) {
 	return DialContext(context.Background(), target, opts...)
@@ -413,6 +429,14 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 
 	for _, opt := range opts {
 		opt(&cc.dopts)
+	}
+
+	if channelz.IsOn() {
+		if cc.dopts.channelzParentID != 0 {
+			cc.channelzID = channelz.RegisterChannel(cc, channelz.NestedChannelT, cc.dopts.channelzParentID, "")
+		} else {
+			cc.channelzID = channelz.RegisterChannel(cc, channelz.TopChannelT, 0, "")
+		}
 	}
 
 	if !cc.dopts.insecure {
@@ -511,8 +535,9 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 		credsClone = creds.Clone()
 	}
 	cc.balancerBuildOpts = balancer.BuildOptions{
-		DialCreds: credsClone,
-		Dialer:    cc.dopts.copts.Dialer,
+		DialCreds:        credsClone,
+		Dialer:           cc.dopts.copts.Dialer,
+		ChannelzParentID: cc.channelzID,
 	}
 
 	// Build the resolver.
@@ -614,6 +639,13 @@ type ClientConn struct {
 	preBalancerName string // previous balancer name.
 	curAddresses    []resolver.Address
 	balancerWrapper *ccBalancerWrapper
+
+	channelzID          int64 // channelz unique identification number
+	czmu                sync.RWMutex
+	callsStarted        int64
+	callsSucceeded      int64
+	callsFailed         int64
+	lastCallStartedTime time.Time
 }
 
 // WaitForStateChange waits until the connectivity.State of ClientConn changes from sourceState or
@@ -777,6 +809,9 @@ func (cc *ClientConn) newAddrConn(addrs []resolver.Address) (*addrConn, error) {
 		cc.mu.Unlock()
 		return nil, ErrClientConnClosing
 	}
+	if channelz.IsOn() {
+		ac.channelzID = channelz.RegisterChannel(ac, channelz.SubChannelT, cc.channelzID, "")
+	}
 	cc.conns[ac] = struct{}{}
 	cc.mu.Unlock()
 	return ac, nil
@@ -793,6 +828,44 @@ func (cc *ClientConn) removeAddrConn(ac *addrConn, err error) {
 	delete(cc.conns, ac)
 	cc.mu.Unlock()
 	ac.tearDown(err)
+}
+
+// ChannelzMetric returns ChannelMetric of current ClientConn.
+// This is an EXPERIMENTAL API.
+func (cc *ClientConn) ChannelzMetric() *channelz.ChannelMetric {
+	state := cc.GetState()
+	cc.czmu.RLock()
+	defer cc.czmu.RUnlock()
+	return &channelz.ChannelMetric{
+		ID:                       cc.channelzID,
+		RefName:                  "",
+		State:                    state,
+		Target:                   cc.target,
+		CallsStarted:             cc.callsStarted,
+		CallsSucceeded:           cc.callsSucceeded,
+		CallsFailed:              cc.callsFailed,
+		LastCallStartedTimestamp: cc.lastCallStartedTime,
+	}
+}
+
+func (cc *ClientConn) incrCallsStarted() {
+	cc.czmu.Lock()
+	cc.callsStarted++
+	// TODO(yuxuanli): will make this a time.Time pointer improve performance?
+	cc.lastCallStartedTime = time.Now()
+	cc.czmu.Unlock()
+}
+
+func (cc *ClientConn) incrCallsSucceeded() {
+	cc.czmu.Lock()
+	cc.callsSucceeded++
+	cc.czmu.Unlock()
+}
+
+func (cc *ClientConn) incrCallsFailed() {
+	cc.czmu.Lock()
+	cc.callsFailed++
+	cc.czmu.Unlock()
 }
 
 // connect starts to creating transport and also starts the transport monitor
@@ -942,15 +1015,21 @@ func (cc *ClientConn) Close() error {
 	bWrapper := cc.balancerWrapper
 	cc.balancerWrapper = nil
 	cc.mu.Unlock()
+
 	cc.blockingpicker.close()
+
 	if rWrapper != nil {
 		rWrapper.close()
 	}
 	if bWrapper != nil {
 		bWrapper.close()
 	}
+
 	for ac := range conns {
 		ac.tearDown(ErrClientConnClosing)
+	}
+	if channelz.IsOn() {
+		channelz.RemoveEntry(cc.channelzID)
 	}
 	return nil
 }
@@ -985,6 +1064,13 @@ type addrConn struct {
 	// connectDeadline is the time by which all connection
 	// negotiations must complete.
 	connectDeadline time.Time
+
+	channelzID          int64 // channelz unique identification number
+	czmu                sync.RWMutex
+	callsStarted        int64
+	callsSucceeded      int64
+	callsFailed         int64
+	lastCallStartedTime time.Time
 }
 
 // adjustParams updates parameters used to create transports upon
@@ -1126,6 +1212,9 @@ func (ac *addrConn) createTransport(connectRetryNum, ridx int, backoffDeadline, 
 		// Do not cancel in the success path because of
 		// this issue in Go1.6: https://github.com/golang/go/issues/15078.
 		connectCtx, cancel := context.WithDeadline(ac.ctx, connectDeadline)
+		if channelz.IsOn() {
+			copts.ChannelzParentID = ac.channelzID
+		}
 		newTr, err := transport.NewClientTransport(connectCtx, ac.cc.ctx, target, copts, onPrefaceReceipt)
 		if err != nil {
 			cancel()
@@ -1367,6 +1456,9 @@ func (ac *addrConn) tearDown(err error) {
 		close(ac.ready)
 		ac.ready = nil
 	}
+	if channelz.IsOn() {
+		channelz.RemoveEntry(ac.channelzID)
+	}
 	return
 }
 
@@ -1382,3 +1474,41 @@ func (ac *addrConn) getState() connectivity.State {
 // Deprecated: This error is never returned by grpc and should not be
 // referenced by users.
 var ErrClientConnTimeout = errors.New("grpc: timed out when dialing")
+
+func (ac *addrConn) ChannelzMetric() *channelz.ChannelMetric {
+	ac.mu.Lock()
+	addr := ac.curAddr.Addr
+	ac.mu.Unlock()
+	state := ac.getState()
+	ac.czmu.RLock()
+	defer ac.czmu.RUnlock()
+	return &channelz.ChannelMetric{
+		ID:                       ac.channelzID,
+		RefName:                  "",
+		State:                    state,
+		Target:                   addr,
+		CallsStarted:             ac.callsStarted,
+		CallsSucceeded:           ac.callsSucceeded,
+		CallsFailed:              ac.callsFailed,
+		LastCallStartedTimestamp: ac.lastCallStartedTime,
+	}
+}
+
+func (ac *addrConn) incrCallsStarted() {
+	ac.czmu.Lock()
+	ac.callsStarted++
+	ac.lastCallStartedTime = time.Now()
+	ac.czmu.Unlock()
+}
+
+func (ac *addrConn) incrCallsSucceeded() {
+	ac.czmu.Lock()
+	ac.callsSucceeded++
+	ac.czmu.Unlock()
+}
+
+func (ac *addrConn) incrCallsFailed() {
+	ac.czmu.Lock()
+	ac.callsFailed++
+	ac.czmu.Unlock()
+}
