@@ -231,7 +231,7 @@ func newHTTP2Server(conn net.Conn, config *ServerConfig) (_ ServerTransport, err
 		t.stats.HandleConn(t.ctx, connBegin)
 	}
 	if channelz.IsOn() {
-		t.channelzID = channelz.RegisterSocket(t, channelz.NormalSocketT, config.ChannelzParentID, "")
+		channelz.RegisterSocket(t, channelz.NormalSocketT, config.ChannelzParentID, "")
 	}
 	t.framer.writer.Flush()
 
@@ -1207,6 +1207,12 @@ func (t *http2Server) drain(code http2.ErrCode, debugData []byte) {
 	}
 	t.drainChan = make(chan struct{})
 	t.controlBuf.put(&goAway{code: code, debugData: debugData, headsUp: true})
+}
+
+func (t *http2Server) SetChannelzID(id int64) {
+	// no lock is needed here, since SetChannelzID is guaranteed to be called before
+	// channelzID field is accessed.
+	t.channelzID = id
 }
 
 func (t *http2Server) ChannelzMetric() *channelz.SocketMetric {

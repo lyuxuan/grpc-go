@@ -349,7 +349,7 @@ func NewServer(opt ...ServerOption) *Server {
 	}
 
 	if channelz.IsOn() {
-		s.channelzID = channelz.RegisterServer(s)
+		channelz.RegisterServer(s)
 	}
 	return s
 }
@@ -475,6 +475,12 @@ func (l *listenSocket) ChannelzMetric() *channelz.SocketMetric {
 	return &channelz.SocketMetric{}
 }
 
+func (l *listenSocket) SetChannelzID(id int64) {
+	// no lock is needed here, since SetChannelzID is guaranteed to be called before
+	// channelzID field is accessed.
+	l.channelzID = id
+}
+
 func (l *listenSocket) Close() error {
 	err := l.Listener.Close()
 	if channelz.IsOn() {
@@ -515,7 +521,7 @@ func (s *Server) Serve(lis net.Listener) error {
 	s.lis[ls] = true
 
 	if channelz.IsOn() {
-		ls.channelzID = channelz.RegisterSocket(ls, channelz.ListenSocketT, s.channelzID, "")
+		channelz.RegisterSocket(ls, channelz.ListenSocketT, s.channelzID, "")
 	}
 	s.mu.Unlock()
 
@@ -782,6 +788,14 @@ func (s *Server) removeConn(c io.Closer) {
 		delete(s.conns, c)
 		s.cv.Broadcast()
 	}
+}
+
+// SetChannelzID returns ServerMetric of current server.
+// This is an EXPERIMENTAL API.
+func (s *Server) SetChannelzID(id int64) {
+	// no lock is needed here, since SetChannelzID is guaranteed to be called before
+	// channelzID field is accessed.
+	s.channelzID = id
 }
 
 // ChannelzMetric returns ServerMetric of current server.

@@ -286,16 +286,28 @@ func TestCZServerListenSocketDeletion(t *testing.T) {
 	s.Stop()
 }
 
-type dummyChannel struct{}
+type dummyChannel struct {
+	channelzID int64
+}
 
 func (d *dummyChannel) ChannelzMetric() *channelz.ChannelMetric {
 	return &channelz.ChannelMetric{}
 }
 
-type dummySocket struct{}
+func (d *dummyChannel) SetChannelzID(id int64) {
+	d.channelzID = id
+}
+
+type dummySocket struct {
+	channelzID int64
+}
 
 func (d *dummySocket) ChannelzMetric() *channelz.SocketMetric {
 	return &channelz.SocketMetric{}
+}
+
+func (d *dummySocket) SetChannelzID(id int64) {
+	d.channelzID = id
 }
 
 func TestCZRecusivelyDeletionOfEntry(t *testing.T) {
@@ -307,11 +319,13 @@ func TestCZRecusivelyDeletionOfEntry(t *testing.T) {
 	//    v             v
 	// Socket1       Socket2
 	channelz.NewChannelzStorage()
-	topChanID := channelz.RegisterChannel(&dummyChannel{}, channelz.TopChannelT, 0, "")
-	subChanID1 := channelz.RegisterChannel(&dummyChannel{}, channelz.SubChannelT, topChanID, "")
-	subChanID2 := channelz.RegisterChannel(&dummyChannel{}, channelz.SubChannelT, topChanID, "")
-	sktID1 := channelz.RegisterSocket(&dummySocket{}, channelz.NormalSocketT, subChanID1, "")
-	sktID2 := channelz.RegisterSocket(&dummySocket{}, channelz.NormalSocketT, subChanID1, "")
+	var topChan, subChan1, subChan2 dummyChannel
+	var skt1, skt2 dummySocket
+	channelz.RegisterChannel(&topChan, channelz.TopChannelT, 0, "")
+	channelz.RegisterChannel(&subChan1, channelz.SubChannelT, topChan.channelzID, "")
+	channelz.RegisterChannel(&subChan2, channelz.SubChannelT, topChan.channelzID, "")
+	channelz.RegisterSocket(&skt1, channelz.NormalSocketT, subChan1.channelzID, "")
+	channelz.RegisterSocket(&skt2, channelz.NormalSocketT, subChan1.channelzID, "")
 
 	tcs, _ := channelz.GetTopChannels(0)
 	if tcs == nil || len(tcs) != 1 {
@@ -320,19 +334,19 @@ func TestCZRecusivelyDeletionOfEntry(t *testing.T) {
 	if len(tcs[0].SubChans) != 2 {
 		t.Fatalf("There should be two SubChannel entries")
 	}
-	sc := channelz.GetSubChannel(subChanID1)
+	sc := channelz.GetSubChannel(subChan1.channelzID)
 	if sc == nil || len(sc.Sockets) != 2 {
 		t.Fatalf("There should be two Socket entries")
 	}
 
-	channelz.RemoveEntry(topChanID)
+	channelz.RemoveEntry(topChan.channelzID)
 	tcs, _ = channelz.GetTopChannels(0)
 	if tcs == nil || len(tcs) != 1 {
 		t.Fatalf("There should be one TopChannel entry")
 	}
 
-	channelz.RemoveEntry(subChanID1)
-	channelz.RemoveEntry(subChanID2)
+	channelz.RemoveEntry(subChan1.channelzID)
+	channelz.RemoveEntry(subChan2.channelzID)
 	tcs, _ = channelz.GetTopChannels(0)
 	if tcs == nil || len(tcs) != 1 {
 		t.Fatalf("There should be one TopChannel entry")
@@ -341,8 +355,8 @@ func TestCZRecusivelyDeletionOfEntry(t *testing.T) {
 		t.Fatalf("There should be one SubChannel entry")
 	}
 
-	channelz.RemoveEntry(sktID1)
-	channelz.RemoveEntry(sktID2)
+	channelz.RemoveEntry(skt1.channelzID)
+	channelz.RemoveEntry(skt2.channelzID)
 	tcs, _ = channelz.GetTopChannels(0)
 	if tcs != nil {
 		t.Fatalf("There should be no TopChannel entry")
