@@ -575,7 +575,7 @@ func (l *listenerWrapper) getLastConn() *rawConnWrapper {
 // Addr reports the address of the listener.
 func (l *listenerWrapper) Addr() net.Addr { return l.Listener.Addr() }
 
-var listen func(network, address string) (net.Listener, error) = net.Listen
+var listen = net.Listen
 
 func (te *test) listenAndServe(ts testpb.TestServiceServer) net.Listener {
 	te.testServer = ts

@@ -841,11 +841,12 @@ func TestCZClientSocketMetricsStreamsAndMessagesCount(t *testing.T) {
 	}
 }
 
-// This test is to complete TestCZClientSocketMetricsStreamsAndMessagesCount by
-// adding the test case of server sending RST_STREAM to client due to client side
-// flow control violation. It is separated from other cases due to setup incompatibly,
-// i.e. max receive size violation will mask flow control violation.
-func TestCZClientSocketMetricsStreamsCountFlowControlRSTStream(t *testing.T) {
+// This test is to complete TestCZClientSocketMetricsStreamsAndMessagesCount and
+// TestCZServerSocketMetricsStreamsAndMessagesCount by adding the test case of
+// server sending RST_STREAM to client due to client side flow control violation.
+// It is separated from other cases due to setup incompatibly, i.e. max receive
+// size violation will mask flow control violation.
+func TestCZClientAndServerSocketMetricsStreamsCountFlowControlRSTStream(t *testing.T) {
 	defer leakcheck.Check(t)
 	turnOnChannelzAndClearPreviousChannelzData()
 	e := tcpClearRREnv
@@ -886,9 +887,21 @@ func TestCZClientSocketMetricsStreamsCountFlowControlRSTStream(t *testing.T) {
 	if skt.StreamsStarted != 1 || skt.StreamsSucceeded != 0 || skt.StreamsFailed != 1 {
 		t.Fatalf("channelz.GetSocket(%d), want (StreamsStarted, StreamsSucceeded, StreamsFailed) = (1, 0, 1), got (%d, %d, %d)", skt.ID, skt.StreamsStarted, skt.StreamsSucceeded, skt.StreamsFailed)
 	}
+	ss, _ := channelz.GetServers(0)
+	if len(ss) != 1 {
+		t.Fatalf("There should only be one server, not %d", len(ss))
+	}
+
+	ns, _ := channelz.GetServerSockets(ss[0].ID, 0)
+	if len(ns) != 1 {
+		t.Fatalf("There should be one server normal socket, not %d", len(ns))
+	}
+	if ns[0].StreamsStarted != 1 || ns[0].StreamsSucceeded != 0 || ns[0].StreamsFailed != 1 {
+		t.Fatalf("Server socket metric with ID %d, want (StreamsStarted, StreamsSucceeded, StreamsFailed) = (1, 0, 1), got (%d, %d, %d)", ns[0].ID, skt.StreamsStarted, skt.StreamsSucceeded, skt.StreamsFailed)
+	}
 }
 
-func TestCZClientSocketMetricsFlowControl(t *testing.T) {
+func TestCZClientAndServerSocketMetricsFlowControl(t *testing.T) {
 	defer leakcheck.Check(t)
 	turnOnChannelzAndClearPreviousChannelzData()
 	e := tcpClearRREnv
@@ -930,7 +943,18 @@ func TestCZClientSocketMetricsFlowControl(t *testing.T) {
 		break
 	}
 	skt := channelz.GetSocket(id)
-	prettyPrintSocketMetric(skt)
+	// 65536 - 5 (Length-Prefixed-Message size) * 10 = 65486
+	if skt.LocalFlowControlWindow != 65536 || skt.RemoteFlowControlWindow != 65486 {
+		t.Fatalf("(LocalFlowControlWindow, RemoteFlowControlWindow) size should be (65536, 65486), not (%d, %d)", skt.LocalFlowControlWindow, skt.RemoteFlowControlWindow)
+	}
+	ss, _ := channelz.GetServers(0)
+	if len(ss) != 1 {
+		t.Fatalf("There should only be one server, not %d", len(ss))
+	}
+	ns, _ := channelz.GetServerSockets(ss[0].ID, 0)
+	if ns[0].LocalFlowControlWindow != 65536 || ns[0].RemoteFlowControlWindow != 65486 {
+		t.Fatalf("(LocalFlowControlWindow, RemoteFlowControlWindow) size should be (65536, 65486), not (%d, %d)", ns[0].LocalFlowControlWindow, ns[0].RemoteFlowControlWindow)
+	}
 }
 
 func TestCZClientSocketMetricsKeepAlive(t *testing.T) {
@@ -969,10 +993,12 @@ func TestCZClientSocketMetricsKeepAlive(t *testing.T) {
 	}
 	time.Sleep(10 * time.Millisecond)
 	skt := channelz.GetSocket(id)
-	prettyPrintSocketMetric(skt)
+	if skt.KeepAlivesSent != 2 { // doIdleCallToInvokeKeepAlive func is set up to send 2 KeepAlives.
+		t.Fatalf("There should be 2 KeepAlives sent, not %d", skt.KeepAlivesSent)
+	}
 }
 
-func TestCZServerSocketMetrics(t *testing.T) {
+func TestCZServerSocketMetricsStreamsAndMessagesCount(t *testing.T) {
 	defer leakcheck.Check(t)
 	turnOnChannelzAndClearPreviousChannelzData()
 	e := tcpClearRREnv
@@ -991,44 +1017,30 @@ func TestCZServerSocketMetrics(t *testing.T) {
 	doSuccessfulUnaryCall(tc, t)
 	time.Sleep(10 * time.Millisecond)
 	ns, _ := channelz.GetServerSockets(ss[0].ID, 0)
-	prettyPrintSocketMetric(ns[0])
+	if ns[0].StreamsStarted != 1 || ns[0].StreamsSucceeded != 1 || ns[0].MessagesSent != 1 || ns[0].MessagesReceived != 1 {
+		t.Fatalf("Server socket metric with ID %d, want (StreamsStarted, StreamsSucceeded, MessagesSent, MessagesReceived) = (1, 1, 1, 1), got (%d, %d, %d, %d)", ns[0].ID, ns[0].StreamsStarted, ns[0].StreamsSucceeded, ns[0].MessagesSent, ns[0].MessagesReceived)
+	}
 
 	doServerSideFailedUnaryCall(tc, t)
 	time.Sleep(10 * time.Millisecond)
 	ns, _ = channelz.GetServerSockets(ss[0].ID, 0)
-	prettyPrintSocketMetric(ns[0])
+	if ns[0].StreamsStarted != 2 || ns[0].StreamsSucceeded != 2 || ns[0].MessagesSent != 1 || ns[0].MessagesReceived != 1 {
+		t.Fatalf("Server socket metric with ID %d, want (StreamsStarted, StreamsSucceeded, MessagesSent, MessagesReceived) = (2, 2, 1, 1), got (%d, %d, %d, %d)", ns[0].ID, ns[0].StreamsStarted, ns[0].StreamsSucceeded, ns[0].MessagesSent, ns[0].MessagesReceived)
+	}
 
 	doClientSideFailedUnaryCall(tc, t)
 	time.Sleep(10 * time.Millisecond)
 	ns, _ = channelz.GetServerSockets(ss[0].ID, 0)
-	prettyPrintSocketMetric(ns[0])
+	if ns[0].StreamsStarted != 3 || ns[0].StreamsSucceeded != 3 || ns[0].MessagesSent != 2 || ns[0].MessagesReceived != 2 {
+		t.Fatalf("Server socket metric with ID %d, want (StreamsStarted, StreamsSucceeded, MessagesSent, MessagesReceived) = (3, 3, 2, 2), got (%d, %d, %d, %d)", ns[0].ID, ns[0].StreamsStarted, ns[0].StreamsSucceeded, ns[0].MessagesSent, ns[0].MessagesReceived)
+	}
 
 	doClientSideInitiatedFailedStream(tc, t)
 	time.Sleep(10 * time.Millisecond)
 	ns, _ = channelz.GetServerSockets(ss[0].ID, 0)
-	prettyPrintSocketMetric(ns[0])
-}
-
-func TestCZServerSocketMetricsWithFlowControl(t *testing.T) {
-	defer leakcheck.Check(t)
-	turnOnChannelzAndClearPreviousChannelzData()
-	e := tcpClearRREnv
-	te := newTest(t, e)
-	te.serverInitialWindowSize = 65536
-	te.serverInitialConnWindowSize = 65536 * 2
-	te.startServer(&testServer{security: e.security})
-	defer te.tearDown()
-	cc, dw := te.clientConnWithConnControl()
-	tc := &testServiceClientWrapper{TestServiceClient: testpb.NewTestServiceClient(cc)}
-	ss, _ := channelz.GetServers(0)
-	if len(ss) != 1 {
-		t.Fatalf("There should only be one server, not %d", len(ss))
+	if ns[0].StreamsStarted != 4 || ns[0].StreamsSucceeded != 3 || ns[0].StreamsFailed != 1 || ns[0].MessagesSent != 3 || ns[0].MessagesReceived != 3 {
+		t.Fatalf("Server socket metric with ID %d, want (StreamsStarted, StreamsSucceeded, StreamsFailed, MessagesSent, MessagesReceived) = (4, 3,1, 3, 3), got (%d, %d, %d, %d)", ns[0].ID, ns[0].StreamsStarted, ns[0].StreamsSucceeded, ns[0].MessagesSent, ns[0].MessagesReceived)
 	}
-
-	doServerSideInitiatedFailedStreamWithClientBreakFlowControl(tc, t, dw)
-	time.Sleep(10 * time.Millisecond)
-	ns, _ := channelz.GetServerSockets(ss[0].ID, 0)
-	prettyPrintSocketMetric(ns[0])
 }
 
 func TestCZServerSocketMetricsKeepAlive(t *testing.T) {
@@ -1046,36 +1058,13 @@ func TestCZServerSocketMetricsKeepAlive(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	ss, _ := channelz.GetServers(0)
 	if len(ss) != 1 {
-		t.Fatalf("There should only be one server, not %d", len(ss))
+		t.Fatalf("There should be one server, not %d", len(ss))
 	}
 	ns, _ := channelz.GetServerSockets(ss[0].ID, 0)
-	prettyPrintSocketMetric(ns[0])
-}
-
-func TestCZServerSocketMetricsFlowControl(t *testing.T) {
-	defer leakcheck.Check(t)
-	turnOnChannelzAndClearPreviousChannelzData()
-	e := tcpClearRREnv
-	te := newTest(t, e)
-	// disable BDP
-	te.serverInitialWindowSize = 65536
-	te.serverInitialConnWindowSize = 65536
-	te.clientInitialWindowSize = 65536
-	te.clientInitialConnWindowSize = 65536
-	te.startServer(&testServer{security: e.security})
-	defer te.tearDown()
-	cc := te.clientConn()
-	tc := testpb.NewTestServiceClient(cc)
-
-	for i := 0; i < 10; i++ {
-		doSuccessfulUnaryCall(tc, t)
+	if len(ns) != 1 {
+		t.Fatalf("There should be one server normal socket, not %d", len(ns))
 	}
-
-	time.Sleep(10 * time.Millisecond)
-	ss, _ := channelz.GetServers(0)
-	if len(ss) != 1 {
-		t.Fatalf("There should only be one server, not %d", len(ss))
+	if ns[0].KeepAlivesSent != 2 { // doIdleCallToInvokeKeepAlive func is set up to send 2 KeepAlives.
+		t.Fatalf("There should be 2 KeepAlives sent, not %d", ns[0].KeepAlivesSent)
 	}
-	ns, _ := channelz.GetServerSockets(ss[0].ID, 0)
-	prettyPrintSocketMetric(ns[0])
 }

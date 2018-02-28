@@ -19,7 +19,6 @@
 package channelz
 
 import (
-	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -79,14 +78,6 @@ func NewChannelzStorage() {
 		servers:          make(map[int64]struct{}),
 	})
 	idGen.reset()
-}
-
-func PrintMap() {
-	fmt.Println("{")
-	for k, v := range db.get().entries {
-		fmt.Printf("%d, type: %#v\n", k, v.Type())
-	}
-	fmt.Println("}")
 }
 
 // GetTopChannels returns up to EntryPerPage number of top channel metric whose
