@@ -66,6 +66,9 @@ func doneWrapper(acw *acBalancerWrapper, done func(balancer.DoneInfo)) func(bala
 		} else {
 			acw.ac.incrCallsSucceeded()
 		}
+		if done != nil {
+			done(b)
+		}
 	}
 }
 
