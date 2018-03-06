@@ -354,7 +354,7 @@ func NewServer(opt ...ServerOption) *Server {
 	}
 
 	if channelz.IsOn() {
-		channelz.RegisterServer(s)
+		s.channelzID = channelz.RegisterServer(s)
 	}
 	return s
 }
@@ -476,8 +476,8 @@ type listenSocket struct {
 	channelzID int64
 }
 
-func (l *listenSocket) ChannelzMetric() *channelz.SocketMetric {
-	return &channelz.SocketMetric{}
+func (l *listenSocket) ChannelzMetric() *channelz.SocketInternalMetric {
+	return &channelz.SocketInternalMetric{}
 }
 
 func (l *listenSocket) SetChannelzID(id int64) {
@@ -526,7 +526,7 @@ func (s *Server) Serve(lis net.Listener) error {
 	s.lis[ls] = true
 
 	if channelz.IsOn() {
-		channelz.RegisterSocket(ls, channelz.ListenSocketT, s.channelzID, "")
+		ls.channelzID = channelz.RegisterListenSocket(ls, s.channelzID, "")
 	}
 	s.mu.Unlock()
 
@@ -795,14 +795,12 @@ func (s *Server) removeConn(c io.Closer) {
 	}
 }
 
-// ChannelzMetric returns ServerMetric of current server.
+// ChannelzMetric returns ServerInternalMetric of current server.
 // This is an EXPERIMENTAL API.
-func (s *Server) ChannelzMetric() *channelz.ServerMetric {
+func (s *Server) ChannelzMetric() *channelz.ServerInternalMetric {
 	s.czmu.RLock()
 	defer s.czmu.RUnlock()
-	return &channelz.ServerMetric{
-		ID:                       s.channelzID,
-		RefName:                  "",
+	return &channelz.ServerInternalMetric{
 		CallsStarted:             s.callsStarted,
 		CallsSucceeded:           s.callsSucceeded,
 		CallsFailed:              s.callsFailed,
@@ -827,14 +825,6 @@ func (s *Server) incrCallsFailed() {
 	s.czmu.Lock()
 	s.callsFailed++
 	s.czmu.Unlock()
-}
-
-// SetChannelzID returns ServerMetric of current server.
-// This is an EXPERIMENTAL API.
-func (s *Server) SetChannelzID(id int64) {
-	// no lock is needed here, since SetChannelzID is guaranteed to be called before
-	// channelzID field is accessed.
-	s.channelzID = id
 }
 
 func (s *Server) sendResponse(t transport.ServerTransport, stream *transport.Stream, msg interface{}, cp Compressor, opts *transport.Options, comp encoding.Compressor) error {

@@ -252,9 +252,10 @@ func TestCZServerSocketRegistrationAndDeletion(t *testing.T) {
 	if len(ns) != num {
 		t.Fatalf("There should be %d normal sockets not %d", num, len(ns))
 	}
-
+	// channelz.PrintMap()
 	ccs[len(ccs)-1].Close()
 	time.Sleep(10 * time.Millisecond)
+
 	ns, _ = channelz.GetServerSockets(ss[0].ID, 0)
 	if len(ns) != num-1 {
 		t.Fatalf("There should be %d normal sockets not %d", num-1, len(ns))
@@ -295,8 +296,8 @@ type dummyChannel struct {
 	channelzID int64
 }
 
-func (d *dummyChannel) ChannelzMetric() *channelz.ChannelMetric {
-	return &channelz.ChannelMetric{}
+func (d *dummyChannel) ChannelzMetric() *channelz.ChannelInternalMetric {
+	return &channelz.ChannelInternalMetric{}
 }
 
 func (d *dummyChannel) SetChannelzID(id int64) {
@@ -307,8 +308,8 @@ type dummySocket struct {
 	channelzID int64
 }
 
-func (d *dummySocket) ChannelzMetric() *channelz.SocketMetric {
-	return &channelz.SocketMetric{}
+func (d *dummySocket) ChannelzMetric() *channelz.SocketInternalMetric {
+	return &channelz.SocketInternalMetric{}
 }
 
 func (d *dummySocket) SetChannelzID(id int64) {
@@ -324,13 +325,11 @@ func TestCZRecusivelyDeletionOfEntry(t *testing.T) {
 	//    v             v
 	// Socket1       Socket2
 	channelz.NewChannelzStorage()
-	var topChan, subChan1, subChan2 dummyChannel
-	var skt1, skt2 dummySocket
-	channelz.RegisterChannel(&topChan, channelz.TopChannelT, 0, "")
-	channelz.RegisterChannel(&subChan1, channelz.SubChannelT, topChan.channelzID, "")
-	channelz.RegisterChannel(&subChan2, channelz.SubChannelT, topChan.channelzID, "")
-	channelz.RegisterSocket(&skt1, channelz.NormalSocketT, subChan1.channelzID, "")
-	channelz.RegisterSocket(&skt2, channelz.NormalSocketT, subChan1.channelzID, "")
+	topChanID := channelz.RegisterChannel(&dummyChannel{}, 0, "")
+	subChanID1 := channelz.RegisterSubChannel(&dummyChannel{}, topChanID, "")
+	subChanID2 := channelz.RegisterSubChannel(&dummyChannel{}, topChanID, "")
+	sktID1 := channelz.RegisterNormalSocket(&dummySocket{}, subChanID1, "")
+	sktID2 := channelz.RegisterNormalSocket(&dummySocket{}, subChanID1, "")
 
 	tcs, _ := channelz.GetTopChannels(0)
 	if tcs == nil || len(tcs) != 1 {
@@ -339,19 +338,19 @@ func TestCZRecusivelyDeletionOfEntry(t *testing.T) {
 	if len(tcs[0].SubChans) != 2 {
 		t.Fatalf("There should be two SubChannel entries")
 	}
-	sc := channelz.GetSubChannel(subChan1.channelzID)
+	sc := channelz.GetSubChannel(subChanID1)
 	if sc == nil || len(sc.Sockets) != 2 {
 		t.Fatalf("There should be two Socket entries")
 	}
 
-	channelz.RemoveEntry(topChan.channelzID)
+	channelz.RemoveEntry(topChanID)
 	tcs, _ = channelz.GetTopChannels(0)
 	if tcs == nil || len(tcs) != 1 {
 		t.Fatalf("There should be one TopChannel entry")
 	}
 
-	channelz.RemoveEntry(subChan1.channelzID)
-	channelz.RemoveEntry(subChan2.channelzID)
+	channelz.RemoveEntry(subChanID1)
+	channelz.RemoveEntry(subChanID2)
 	tcs, _ = channelz.GetTopChannels(0)
 	if tcs == nil || len(tcs) != 1 {
 		t.Fatalf("There should be one TopChannel entry")
@@ -360,8 +359,8 @@ func TestCZRecusivelyDeletionOfEntry(t *testing.T) {
 		t.Fatalf("There should be one SubChannel entry")
 	}
 
-	channelz.RemoveEntry(skt1.channelzID)
-	channelz.RemoveEntry(skt2.channelzID)
+	channelz.RemoveEntry(sktID1)
+	channelz.RemoveEntry(sktID2)
 	tcs, _ = channelz.GetTopChannels(0)
 	if tcs != nil {
 		t.Fatalf("There should be no TopChannel entry")
@@ -375,12 +374,12 @@ func prettyPrintChannelMetric(c *channelz.ChannelMetric) {
 	fmt.Println("{")
 	fmt.Printf("  ID: %+v\n", c.ID)
 	fmt.Printf("  RefName: %+v\n", c.RefName)
-	fmt.Printf("  State: %+v\n", c.State)
-	fmt.Printf("  Target: %+v\n", c.Target)
-	fmt.Printf("  CallsStarted: %+v\n", c.CallsStarted)
-	fmt.Printf("  CallsSucceeded: %+v\n", c.CallsSucceeded)
-	fmt.Printf("  CallsFailed: %+v\n", c.CallsFailed)
-	fmt.Printf("  LastCallStartedTimestamp: %+v\n", c.LastCallStartedTimestamp)
+	fmt.Printf("  State: %+v\n", c.ChannelData.State)
+	fmt.Printf("  Target: %+v\n", c.ChannelData.Target)
+	fmt.Printf("  CallsStarted: %+v\n", c.ChannelData.CallsStarted)
+	fmt.Printf("  CallsSucceeded: %+v\n", c.ChannelData.CallsSucceeded)
+	fmt.Printf("  CallsFailed: %+v\n", c.ChannelData.CallsFailed)
+	fmt.Printf("  LastCallStartedTimestamp: %+v\n", c.ChannelData.LastCallStartedTimestamp)
 	fmt.Printf("  NestedChans: %+v\n", c.NestedChans)
 	fmt.Printf("  SubChans: %+v\n", c.SubChans)
 	fmt.Printf("  Sockets: %+v\n", c.Sockets)
@@ -448,9 +447,9 @@ func TestCZChannelMetrics(t *testing.T) {
 		if sc == nil {
 			t.Fatalf("got <nil> subchannel")
 		}
-		cst += sc.CallsStarted
-		csu += sc.CallsSucceeded
-		cf += sc.CallsFailed
+		cst += sc.ChannelData.CallsStarted
+		csu += sc.ChannelData.CallsSucceeded
+		cf += sc.ChannelData.CallsFailed
 	}
 	if cst != 3 {
 		t.Fatalf("There should be 3 CallsStarted not %d", cst)
@@ -461,14 +460,14 @@ func TestCZChannelMetrics(t *testing.T) {
 	if cf != 1 {
 		t.Fatalf("There should be 1 CallsFailed not %d", cf)
 	}
-	if tcs[0].CallsStarted != 3 {
-		t.Fatalf("There should be 3 CallsStarted not %d", tcs[0].CallsStarted)
+	if tcs[0].ChannelData.CallsStarted != 3 {
+		t.Fatalf("There should be 3 CallsStarted not %d", tcs[0].ChannelData.CallsStarted)
 	}
-	if tcs[0].CallsSucceeded != 1 {
-		t.Fatalf("There should be 1 CallsSucceeded not %d", tcs[0].CallsSucceeded)
+	if tcs[0].ChannelData.CallsSucceeded != 1 {
+		t.Fatalf("There should be 1 CallsSucceeded not %d", tcs[0].ChannelData.CallsSucceeded)
 	}
-	if tcs[0].CallsFailed != 1 {
-		t.Fatalf("There should be 1 CallsFailed not %d", tcs[0].CallsFailed)
+	if tcs[0].ChannelData.CallsFailed != 1 {
+		t.Fatalf("There should be 1 CallsFailed not %d", tcs[0].ChannelData.CallsFailed)
 	}
 }
 
@@ -479,10 +478,10 @@ func prettyPrintServerMetric(s *channelz.ServerMetric) {
 	fmt.Println("{")
 	fmt.Printf("  ID: %+v\n", s.ID)
 	fmt.Printf("  RefName: %+v\n", s.RefName)
-	fmt.Printf("  CallsStarted: %+v\n", s.CallsStarted)
-	fmt.Printf("  CallsSucceeded: %+v\n", s.CallsSucceeded)
-	fmt.Printf("  CallsFailed: %+v\n", s.CallsFailed)
-	fmt.Printf("  LastCallStartedTimestamp: %+v\n", s.LastCallStartedTimestamp)
+	fmt.Printf("  CallsStarted: %+v\n", s.ServerData.CallsStarted)
+	fmt.Printf("  CallsSucceeded: %+v\n", s.ServerData.CallsSucceeded)
+	fmt.Printf("  CallsFailed: %+v\n", s.ServerData.CallsFailed)
+	fmt.Printf("  LastCallStartedTimestamp: %+v\n", s.ServerData.LastCallStartedTimestamp)
 	fmt.Printf("  Sockets: %+v\n", s.ListenSockets)
 	fmt.Println("}")
 }
@@ -528,14 +527,14 @@ func TestCZServerMetrics(t *testing.T) {
 	if len(ss) != 1 {
 		t.Fatalf("There should only be one server, not %d", len(ss))
 	}
-	if ss[0].CallsStarted != 3 {
-		t.Fatalf("There should be 3 CallsStarted not %d", ss[0].CallsStarted)
+	if ss[0].ServerData.CallsStarted != 3 {
+		t.Fatalf("There should be 3 CallsStarted not %d", ss[0].ServerData.CallsStarted)
 	}
-	if ss[0].CallsSucceeded != 1 {
-		t.Fatalf("There should be 1 CallsSucceeded not %d", ss[0].CallsSucceeded)
+	if ss[0].ServerData.CallsSucceeded != 1 {
+		t.Fatalf("There should be 1 CallsSucceeded not %d", ss[0].ServerData.CallsSucceeded)
 	}
-	if ss[0].CallsFailed != 1 {
-		t.Fatalf("There should be 1 CallsFailed not %d", ss[0].CallsFailed)
+	if ss[0].ServerData.CallsFailed != 1 {
+		t.Fatalf("There should be 1 CallsFailed not %d", ss[0].ServerData.CallsFailed)
 	}
 }
 
@@ -546,21 +545,21 @@ func prettyPrintSocketMetric(s *channelz.SocketMetric) {
 	fmt.Println("{")
 	fmt.Printf("  ID: %+v\n", s.ID)
 	fmt.Printf("  RefName: %+v\n", s.RefName)
-	fmt.Printf("  StreamsStarted: %+v\n", s.StreamsStarted)
-	fmt.Printf("  StreamsSucceeded: %+v\n", s.StreamsSucceeded)
-	fmt.Printf("  StreamsFailed: %+v\n", s.StreamsFailed)
-	fmt.Printf("  MessagesSent: %+v\n", s.MessagesSent)
-	fmt.Printf("  MessagesReceived: %+v\n", s.MessagesReceived)
-	fmt.Printf("  KeepAlivesSent: %+v\n", s.KeepAlivesSent)
-	fmt.Printf("  LastLocalStreamCreatedTimestamp: %+v\n", s.LastLocalStreamCreatedTimestamp)
-	fmt.Printf("  LastRemoteStreamCreatedTimestamp: %+v\n", s.LastRemoteStreamCreatedTimestamp)
-	fmt.Printf("  LastMessageSentTimestamp: %+v\n", s.LastMessageSentTimestamp)
-	fmt.Printf("  LastMessageReceivedTimestamp: %+v\n", s.LastMessageReceivedTimestamp)
-	fmt.Printf("  LocalFlowControlWindow: %+v\n", s.LocalFlowControlWindow)
-	fmt.Printf("  RemoteFlowControlWindow: %+v\n", s.RemoteFlowControlWindow)
-	fmt.Printf("  Local: %+v\n", s.Local)
-	fmt.Printf("  Remote: %+v\n", s.Remote)
-	fmt.Printf("  RemoteName: %+v\n", s.RemoteName)
+	fmt.Printf("  StreamsStarted: %+v\n", s.SocketData.StreamsStarted)
+	fmt.Printf("  StreamsSucceeded: %+v\n", s.SocketData.StreamsSucceeded)
+	fmt.Printf("  StreamsFailed: %+v\n", s.SocketData.StreamsFailed)
+	fmt.Printf("  MessagesSent: %+v\n", s.SocketData.MessagesSent)
+	fmt.Printf("  MessagesReceived: %+v\n", s.SocketData.MessagesReceived)
+	fmt.Printf("  KeepAlivesSent: %+v\n", s.SocketData.KeepAlivesSent)
+	fmt.Printf("  LastLocalStreamCreatedTimestamp: %+v\n", s.SocketData.LastLocalStreamCreatedTimestamp)
+	fmt.Printf("  LastRemoteStreamCreatedTimestamp: %+v\n", s.SocketData.LastRemoteStreamCreatedTimestamp)
+	fmt.Printf("  LastMessageSentTimestamp: %+v\n", s.SocketData.LastMessageSentTimestamp)
+	fmt.Printf("  LastMessageReceivedTimestamp: %+v\n", s.SocketData.LastMessageReceivedTimestamp)
+	fmt.Printf("  LocalFlowControlWindow: %+v\n", s.SocketData.LocalFlowControlWindow)
+	fmt.Printf("  RemoteFlowControlWindow: %+v\n", s.SocketData.RemoteFlowControlWindow)
+	fmt.Printf("  Local: %+v\n", s.SocketData.Local)
+	fmt.Printf("  Remote: %+v\n", s.SocketData.Remote)
+	fmt.Printf("  RemoteName: %+v\n", s.SocketData.RemoteName)
 	fmt.Println("}")
 }
 
@@ -821,36 +820,41 @@ func TestCZClientSocketMetricsStreamsAndMessagesCount(t *testing.T) {
 		break
 	}
 	skt := channelz.GetSocket(id)
-	if skt.StreamsStarted != 1 || skt.StreamsSucceeded != 1 || skt.MessagesSent != 1 || skt.MessagesReceived != 1 {
-		t.Fatalf("channelz.GetSocket(%d), want (StreamsStarted, StreamsSucceeded, MessagesSent, MessagesReceived) = (1, 1, 1, 1), got (%d, %d, %d, %d)", skt.ID, skt.StreamsStarted, skt.StreamsSucceeded, skt.MessagesSent, skt.MessagesReceived)
+	sktData := skt.SocketData
+	if sktData.StreamsStarted != 1 || sktData.StreamsSucceeded != 1 || sktData.MessagesSent != 1 || sktData.MessagesReceived != 1 {
+		t.Fatalf("channelz.GetSocket(%d), want (StreamsStarted, StreamsSucceeded, MessagesSent, MessagesReceived) = (1, 1, 1, 1), got (%d, %d, %d, %d)", skt.ID, sktData.StreamsStarted, sktData.StreamsSucceeded, sktData.MessagesSent, sktData.MessagesReceived)
 	}
 
 	doServerSideFailedUnaryCall(tc, t)
 	time.Sleep(10 * time.Millisecond)
 	skt = channelz.GetSocket(id)
-	if skt.StreamsStarted != 2 || skt.StreamsSucceeded != 2 || skt.MessagesSent != 2 || skt.MessagesReceived != 1 {
-		t.Fatalf("channelz.GetSocket(%d), want (StreamsStarted, StreamsSucceeded, MessagesSent, MessagesReceived) = (2, 2, 2, 1), got (%d, %d, %d, %d)", skt.ID, skt.StreamsStarted, skt.StreamsSucceeded, skt.MessagesSent, skt.MessagesReceived)
+	sktData = skt.SocketData
+	if sktData.StreamsStarted != 2 || sktData.StreamsSucceeded != 2 || sktData.MessagesSent != 2 || sktData.MessagesReceived != 1 {
+		t.Fatalf("channelz.GetSocket(%d), want (StreamsStarted, StreamsSucceeded, MessagesSent, MessagesReceived) = (2, 2, 2, 1), got (%d, %d, %d, %d)", skt.ID, sktData.StreamsStarted, sktData.StreamsSucceeded, sktData.MessagesSent, sktData.MessagesReceived)
 	}
 
 	doClientSideInitiatedFailedStream(tc, t)
 	time.Sleep(10 * time.Millisecond)
 	skt = channelz.GetSocket(id)
-	if skt.StreamsStarted != 3 || skt.StreamsSucceeded != 2 || skt.StreamsFailed != 1 || skt.MessagesSent != 3 || skt.MessagesReceived != 2 {
-		t.Fatalf("channelz.GetSocket(%d), want (StreamsStarted, StreamsSucceeded, StreamsFailed, MessagesSent, MessagesReceived) = (3, 2, 1, 3, 2), got (%d, %d, %d, %d, %d)", skt.ID, skt.StreamsStarted, skt.StreamsSucceeded, skt.StreamsFailed, skt.MessagesSent, skt.MessagesReceived)
+	sktData = skt.SocketData
+	if sktData.StreamsStarted != 3 || sktData.StreamsSucceeded != 2 || sktData.StreamsFailed != 1 || sktData.MessagesSent != 3 || sktData.MessagesReceived != 2 {
+		t.Fatalf("channelz.GetSocket(%d), want (StreamsStarted, StreamsSucceeded, StreamsFailed, MessagesSent, MessagesReceived) = (3, 2, 1, 3, 2), got (%d, %d, %d, %d, %d)", skt.ID, sktData.StreamsStarted, sktData.StreamsSucceeded, sktData.StreamsFailed, sktData.MessagesSent, sktData.MessagesReceived)
 	}
 
 	doServerSideInitiatedFailedStreamWithRSTStream(tc, t, rcw)
 	time.Sleep(10 * time.Millisecond)
 	skt = channelz.GetSocket(id)
-	if skt.StreamsStarted != 4 || skt.StreamsSucceeded != 2 || skt.StreamsFailed != 2 || skt.MessagesSent != 4 || skt.MessagesReceived != 3 {
-		t.Fatalf("channelz.GetSocket(%d), want (StreamsStarted, StreamsSucceeded, StreamsFailed, MessagesSent, MessagesReceived) = (4, 2, 2, 4, 3), got (%d, %d, %d, %d, %d)", skt.ID, skt.StreamsStarted, skt.StreamsSucceeded, skt.StreamsFailed, skt.MessagesSent, skt.MessagesReceived)
+	sktData = skt.SocketData
+	if sktData.StreamsStarted != 4 || sktData.StreamsSucceeded != 2 || sktData.StreamsFailed != 2 || sktData.MessagesSent != 4 || sktData.MessagesReceived != 3 {
+		t.Fatalf("channelz.GetSocket(%d), want (StreamsStarted, StreamsSucceeded, StreamsFailed, MessagesSent, MessagesReceived) = (4, 2, 2, 4, 3), got (%d, %d, %d, %d, %d)", skt.ID, sktData.StreamsStarted, sktData.StreamsSucceeded, sktData.StreamsFailed, sktData.MessagesSent, sktData.MessagesReceived)
 	}
 
 	doServerSideInitiatedFailedStreamWithGoAway(tc, t, rcw)
 	time.Sleep(10 * time.Millisecond)
 	skt = channelz.GetSocket(id)
-	if skt.StreamsStarted != 6 || skt.StreamsSucceeded != 2 || skt.StreamsFailed != 3 || skt.MessagesSent != 4 || skt.MessagesReceived != 3 {
-		t.Fatalf("channelz.GetSocket(%d), want (StreamsStarted, StreamsSucceeded, StreamsFailed, MessagesSent, MessagesReceived) = (6, 2, 3, 4, 3), got (%d, %d, %d, %d, %d)", skt.ID, skt.StreamsStarted, skt.StreamsSucceeded, skt.StreamsFailed, skt.MessagesSent, skt.MessagesReceived)
+	sktData = skt.SocketData
+	if sktData.StreamsStarted != 6 || sktData.StreamsSucceeded != 2 || sktData.StreamsFailed != 3 || sktData.MessagesSent != 4 || sktData.MessagesReceived != 3 {
+		t.Fatalf("channelz.GetSocket(%d), want (StreamsStarted, StreamsSucceeded, StreamsFailed, MessagesSent, MessagesReceived) = (6, 2, 3, 4, 3), got (%d, %d, %d, %d, %d)", skt.ID, sktData.StreamsStarted, sktData.StreamsSucceeded, sktData.StreamsFailed, sktData.MessagesSent, sktData.MessagesReceived)
 	}
 }
 
@@ -897,8 +901,9 @@ func TestCZClientAndServerSocketMetricsStreamsCountFlowControlRSTStream(t *testi
 		break
 	}
 	skt := channelz.GetSocket(id)
-	if skt.StreamsStarted != 1 || skt.StreamsSucceeded != 0 || skt.StreamsFailed != 1 {
-		t.Fatalf("channelz.GetSocket(%d), want (StreamsStarted, StreamsSucceeded, StreamsFailed) = (1, 0, 1), got (%d, %d, %d)", skt.ID, skt.StreamsStarted, skt.StreamsSucceeded, skt.StreamsFailed)
+	sktData := skt.SocketData
+	if sktData.StreamsStarted != 1 || sktData.StreamsSucceeded != 0 || sktData.StreamsFailed != 1 {
+		t.Fatalf("channelz.GetSocket(%d), want (StreamsStarted, StreamsSucceeded, StreamsFailed) = (1, 0, 1), got (%d, %d, %d)", skt.ID, sktData.StreamsStarted, sktData.StreamsSucceeded, sktData.StreamsFailed)
 	}
 	ss, _ := channelz.GetServers(0)
 	if len(ss) != 1 {
@@ -909,8 +914,9 @@ func TestCZClientAndServerSocketMetricsStreamsCountFlowControlRSTStream(t *testi
 	if len(ns) != 1 {
 		t.Fatalf("There should be one server normal socket, not %d", len(ns))
 	}
-	if ns[0].StreamsStarted != 1 || ns[0].StreamsSucceeded != 0 || ns[0].StreamsFailed != 1 {
-		t.Fatalf("Server socket metric with ID %d, want (StreamsStarted, StreamsSucceeded, StreamsFailed) = (1, 0, 1), got (%d, %d, %d)", ns[0].ID, skt.StreamsStarted, skt.StreamsSucceeded, skt.StreamsFailed)
+	sktData = ns[0].SocketData
+	if sktData.StreamsStarted != 1 || sktData.StreamsSucceeded != 0 || sktData.StreamsFailed != 1 {
+		t.Fatalf("Server socket metric with ID %d, want (StreamsStarted, StreamsSucceeded, StreamsFailed) = (1, 0, 1), got (%d, %d, %d)", ns[0].ID, sktData.StreamsStarted, sktData.StreamsSucceeded, sktData.StreamsFailed)
 	}
 }
 
@@ -956,17 +962,19 @@ func TestCZClientAndServerSocketMetricsFlowControl(t *testing.T) {
 		break
 	}
 	skt := channelz.GetSocket(id)
+	sktData := skt.SocketData
 	// 65536 - 5 (Length-Prefixed-Message size) * 10 = 65486
-	if skt.LocalFlowControlWindow != 65536 || skt.RemoteFlowControlWindow != 65486 {
-		t.Fatalf("(LocalFlowControlWindow, RemoteFlowControlWindow) size should be (65536, 65486), not (%d, %d)", skt.LocalFlowControlWindow, skt.RemoteFlowControlWindow)
+	if sktData.LocalFlowControlWindow != 65536 || sktData.RemoteFlowControlWindow != 65486 {
+		t.Fatalf("(LocalFlowControlWindow, RemoteFlowControlWindow) size should be (65536, 65486), not (%d, %d)", sktData.LocalFlowControlWindow, sktData.RemoteFlowControlWindow)
 	}
 	ss, _ := channelz.GetServers(0)
 	if len(ss) != 1 {
 		t.Fatalf("There should only be one server, not %d", len(ss))
 	}
 	ns, _ := channelz.GetServerSockets(ss[0].ID, 0)
-	if ns[0].LocalFlowControlWindow != 65536 || ns[0].RemoteFlowControlWindow != 65486 {
-		t.Fatalf("(LocalFlowControlWindow, RemoteFlowControlWindow) size should be (65536, 65486), not (%d, %d)", ns[0].LocalFlowControlWindow, ns[0].RemoteFlowControlWindow)
+	sktData = ns[0].SocketData
+	if sktData.LocalFlowControlWindow != 65536 || sktData.RemoteFlowControlWindow != 65486 {
+		t.Fatalf("(LocalFlowControlWindow, RemoteFlowControlWindow) size should be (65536, 65486), not (%d, %d)", sktData.LocalFlowControlWindow, sktData.RemoteFlowControlWindow)
 	}
 }
 
@@ -1006,8 +1014,8 @@ func TestCZClientSocketMetricsKeepAlive(t *testing.T) {
 	}
 	time.Sleep(10 * time.Millisecond)
 	skt := channelz.GetSocket(id)
-	if skt.KeepAlivesSent != 2 { // doIdleCallToInvokeKeepAlive func is set up to send 2 KeepAlives.
-		t.Fatalf("There should be 2 KeepAlives sent, not %d", skt.KeepAlivesSent)
+	if skt.SocketData.KeepAlivesSent != 2 { // doIdleCallToInvokeKeepAlive func is set up to send 2 KeepAlives.
+		t.Fatalf("There should be 2 KeepAlives sent, not %d", skt.SocketData.KeepAlivesSent)
 	}
 }
 
@@ -1030,29 +1038,33 @@ func TestCZServerSocketMetricsStreamsAndMessagesCount(t *testing.T) {
 	doSuccessfulUnaryCall(tc, t)
 	time.Sleep(10 * time.Millisecond)
 	ns, _ := channelz.GetServerSockets(ss[0].ID, 0)
-	if ns[0].StreamsStarted != 1 || ns[0].StreamsSucceeded != 1 || ns[0].MessagesSent != 1 || ns[0].MessagesReceived != 1 {
-		t.Fatalf("Server socket metric with ID %d, want (StreamsStarted, StreamsSucceeded, MessagesSent, MessagesReceived) = (1, 1, 1, 1), got (%d, %d, %d, %d)", ns[0].ID, ns[0].StreamsStarted, ns[0].StreamsSucceeded, ns[0].MessagesSent, ns[0].MessagesReceived)
+	sktData := ns[0].SocketData
+	if sktData.StreamsStarted != 1 || sktData.StreamsSucceeded != 1 || sktData.MessagesSent != 1 || sktData.MessagesReceived != 1 {
+		t.Fatalf("Server socket metric with ID %d, want (StreamsStarted, StreamsSucceeded, MessagesSent, MessagesReceived) = (1, 1, 1, 1), got (%d, %d, %d, %d)", ns[0].ID, sktData.StreamsStarted, sktData.StreamsSucceeded, sktData.MessagesSent, sktData.MessagesReceived)
 	}
 
 	doServerSideFailedUnaryCall(tc, t)
 	time.Sleep(10 * time.Millisecond)
 	ns, _ = channelz.GetServerSockets(ss[0].ID, 0)
-	if ns[0].StreamsStarted != 2 || ns[0].StreamsSucceeded != 2 || ns[0].MessagesSent != 1 || ns[0].MessagesReceived != 1 {
-		t.Fatalf("Server socket metric with ID %d, want (StreamsStarted, StreamsSucceeded, MessagesSent, MessagesReceived) = (2, 2, 1, 1), got (%d, %d, %d, %d)", ns[0].ID, ns[0].StreamsStarted, ns[0].StreamsSucceeded, ns[0].MessagesSent, ns[0].MessagesReceived)
+	sktData = ns[0].SocketData
+	if sktData.StreamsStarted != 2 || sktData.StreamsSucceeded != 2 || sktData.MessagesSent != 1 || sktData.MessagesReceived != 1 {
+		t.Fatalf("Server socket metric with ID %d, want (StreamsStarted, StreamsSucceeded, MessagesSent, MessagesReceived) = (2, 2, 1, 1), got (%d, %d, %d, %d)", ns[0].ID, sktData.StreamsStarted, sktData.StreamsSucceeded, sktData.MessagesSent, sktData.MessagesReceived)
 	}
 
 	doClientSideFailedUnaryCall(tc, t)
 	time.Sleep(10 * time.Millisecond)
 	ns, _ = channelz.GetServerSockets(ss[0].ID, 0)
-	if ns[0].StreamsStarted != 3 || ns[0].StreamsSucceeded != 3 || ns[0].MessagesSent != 2 || ns[0].MessagesReceived != 2 {
-		t.Fatalf("Server socket metric with ID %d, want (StreamsStarted, StreamsSucceeded, MessagesSent, MessagesReceived) = (3, 3, 2, 2), got (%d, %d, %d, %d)", ns[0].ID, ns[0].StreamsStarted, ns[0].StreamsSucceeded, ns[0].MessagesSent, ns[0].MessagesReceived)
+	sktData = ns[0].SocketData
+	if sktData.StreamsStarted != 3 || sktData.StreamsSucceeded != 3 || sktData.MessagesSent != 2 || sktData.MessagesReceived != 2 {
+		t.Fatalf("Server socket metric with ID %d, want (StreamsStarted, StreamsSucceeded, MessagesSent, MessagesReceived) = (3, 3, 2, 2), got (%d, %d, %d, %d)", ns[0].ID, sktData.StreamsStarted, sktData.StreamsSucceeded, sktData.MessagesSent, sktData.MessagesReceived)
 	}
 
 	doClientSideInitiatedFailedStream(tc, t)
 	time.Sleep(10 * time.Millisecond)
 	ns, _ = channelz.GetServerSockets(ss[0].ID, 0)
-	if ns[0].StreamsStarted != 4 || ns[0].StreamsSucceeded != 3 || ns[0].StreamsFailed != 1 || ns[0].MessagesSent != 3 || ns[0].MessagesReceived != 3 {
-		t.Fatalf("Server socket metric with ID %d, want (StreamsStarted, StreamsSucceeded, StreamsFailed, MessagesSent, MessagesReceived) = (4, 3,1, 3, 3), got (%d, %d, %d, %d)", ns[0].ID, ns[0].StreamsStarted, ns[0].StreamsSucceeded, ns[0].MessagesSent, ns[0].MessagesReceived)
+	sktData = ns[0].SocketData
+	if sktData.StreamsStarted != 4 || sktData.StreamsSucceeded != 3 || sktData.StreamsFailed != 1 || sktData.MessagesSent != 3 || sktData.MessagesReceived != 3 {
+		t.Fatalf("Server socket metric with ID %d, want (StreamsStarted, StreamsSucceeded, StreamsFailed, MessagesSent, MessagesReceived) = (4, 3,1, 3, 3), got (%d, %d, %d, %d)", ns[0].ID, sktData.StreamsStarted, sktData.StreamsSucceeded, sktData.MessagesSent, sktData.MessagesReceived)
 	}
 }
 
@@ -1077,7 +1089,7 @@ func TestCZServerSocketMetricsKeepAlive(t *testing.T) {
 	if len(ns) != 1 {
 		t.Fatalf("There should be one server normal socket, not %d", len(ns))
 	}
-	if ns[0].KeepAlivesSent != 2 { // doIdleCallToInvokeKeepAlive func is set up to send 2 KeepAlives.
-		t.Fatalf("There should be 2 KeepAlives sent, not %d", ns[0].KeepAlivesSent)
+	if ns[0].SocketData.KeepAlivesSent != 2 { // doIdleCallToInvokeKeepAlive func is set up to send 2 KeepAlives.
+		t.Fatalf("There should be 2 KeepAlives sent, not %d", ns[0].SocketData.KeepAlivesSent)
 	}
 }

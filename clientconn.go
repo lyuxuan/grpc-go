@@ -433,9 +433,9 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 
 	if channelz.IsOn() {
 		if cc.dopts.channelzParentID != 0 {
-			channelz.RegisterChannel(cc, channelz.NestedChannelT, cc.dopts.channelzParentID, "")
+			cc.channelzID = channelz.RegisterChannel(cc, cc.dopts.channelzParentID, "")
 		} else {
-			channelz.RegisterChannel(cc, channelz.TopChannelT, 0, "")
+			cc.channelzID = channelz.RegisterChannel(cc, 0, "")
 		}
 	}
 
@@ -810,7 +810,7 @@ func (cc *ClientConn) newAddrConn(addrs []resolver.Address) (*addrConn, error) {
 		return nil, ErrClientConnClosing
 	}
 	if channelz.IsOn() {
-		channelz.RegisterChannel(ac, channelz.SubChannelT, cc.channelzID, "")
+		ac.channelzID = channelz.RegisterSubChannel(ac, cc.channelzID, "")
 	}
 	cc.conns[ac] = struct{}{}
 	cc.mu.Unlock()
@@ -830,15 +830,13 @@ func (cc *ClientConn) removeAddrConn(ac *addrConn, err error) {
 	ac.tearDown(err)
 }
 
-// ChannelzMetric returns ChannelMetric of current ClientConn.
+// ChannelzMetric returns ChannelInternalMetric of current ClientConn.
 // This is an EXPERIMENTAL API.
-func (cc *ClientConn) ChannelzMetric() *channelz.ChannelMetric {
+func (cc *ClientConn) ChannelzMetric() *channelz.ChannelInternalMetric {
 	state := cc.GetState()
 	cc.czmu.RLock()
 	defer cc.czmu.RUnlock()
-	return &channelz.ChannelMetric{
-		ID:                       cc.channelzID,
-		RefName:                  "",
+	return &channelz.ChannelInternalMetric{
 		State:                    state,
 		Target:                   cc.target,
 		CallsStarted:             cc.callsStarted,
@@ -868,15 +866,6 @@ func (cc *ClientConn) incrCallsFailed() {
 	cc.czmu.Unlock()
 }
 
-// SetChannelzID sets the channelzID field.
-// This function should not be used by grpc user.
-// This is an EXPERIMENTAL API.
-func (cc *ClientConn) SetChannelzID(id int64) {
-	// no lock is needed here, since SetChannelzID is guaranteed to be called before
-	// channelzID field is accessed.
-	cc.channelzID = id
-}
-
 // connect starts to creating transport and also starts the transport monitor
 // goroutine for this ac.
 // It does nothing if the ac is not IDLE.
@@ -895,7 +884,6 @@ func (ac *addrConn) connect() error {
 	ac.state = connectivity.Connecting
 	ac.cc.handleSubConnStateChange(ac.acbw, ac.state)
 	ac.mu.Unlock()
-
 	// Start a goroutine connecting to the server asynchronously.
 	go func() {
 		if err := ac.resetTransport(); err != nil {
@@ -1477,22 +1465,14 @@ func (ac *addrConn) getState() connectivity.State {
 	return ac.state
 }
 
-func (ac *addrConn) SetChannelzID(id int64) {
-	// no lock is needed here, since SetChannelzID is guaranteed to be called before
-	// channelzID field is accessed.
-	ac.channelzID = id
-}
-
-func (ac *addrConn) ChannelzMetric() *channelz.ChannelMetric {
+func (ac *addrConn) ChannelzMetric() *channelz.ChannelInternalMetric {
 	ac.mu.Lock()
 	addr := ac.curAddr.Addr
 	ac.mu.Unlock()
 	state := ac.getState()
 	ac.czmu.RLock()
 	defer ac.czmu.RUnlock()
-	return &channelz.ChannelMetric{
-		ID:                       ac.channelzID,
-		RefName:                  "",
+	return &channelz.ChannelInternalMetric{
 		State:                    state,
 		Target:                   addr,
 		CallsStarted:             ac.callsStarted,

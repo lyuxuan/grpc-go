@@ -242,7 +242,7 @@ func newHTTP2Server(conn net.Conn, config *ServerConfig) (_ ServerTransport, err
 		t.stats.HandleConn(t.ctx, connBegin)
 	}
 	if channelz.IsOn() {
-		channelz.RegisterSocket(t, channelz.NormalSocketT, config.ChannelzParentID, "")
+		t.channelzID = channelz.RegisterNormalSocket(t, config.ChannelzParentID, "")
 	}
 	t.framer.writer.Flush()
 
@@ -1238,10 +1238,9 @@ func (t *http2Server) drain(code http2.ErrCode, debugData []byte) {
 	t.controlBuf.put(&goAway{code: code, debugData: debugData, headsUp: true})
 }
 
-func (t *http2Server) ChannelzMetric() *channelz.SocketMetric {
+func (t *http2Server) ChannelzMetric() *channelz.SocketInternalMetric {
 	t.czmu.RLock()
-	s := channelz.SocketMetric{
-		ID:                               t.channelzID,
+	s := channelz.SocketInternalMetric{
 		StreamsStarted:                   t.streamsStarted,
 		StreamsSucceeded:                 t.streamsSucceeded,
 		StreamsFailed:                    t.streamsFailed,
@@ -1275,12 +1274,6 @@ func (t *http2Server) IncrMsgRecv() {
 	t.msgRecv++
 	t.lastMsgRecv = time.Now()
 	t.czmu.Unlock()
-}
-
-func (t *http2Server) SetChannelzID(id int64) {
-	// no lock is needed here, since SetChannelzID is guaranteed to be called before
-	// channelzID field is accessed.
-	t.channelzID = id
 }
 
 var rgen = rand.New(rand.NewSource(time.Now().UnixNano()))

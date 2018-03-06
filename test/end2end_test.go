@@ -69,6 +69,10 @@ import (
 	"google.golang.org/grpc/testdata"
 )
 
+func init() {
+	grpc.RegisterChannelz()
+}
+
 var (
 	// For headers:
 	testMetadata = metadata.MD{
