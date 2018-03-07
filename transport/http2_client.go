@@ -1433,8 +1433,8 @@ func (t *http2Client) ChannelzMetric() *channelz.SocketInternalMetric {
 		LastLocalStreamCreatedTimestamp: t.lastStreamCreated,
 		LastMessageSentTimestamp:        t.lastMsgSent,
 		LastMessageReceivedTimestamp:    t.lastMsgRecv,
-		LocalFlowControlWindow:          t.fc.GetInFlowWindow(),
-		RemoteFlowControlWindow:         t.sendQuotaPool.GetOutFlowWindow(),
+		LocalFlowControlWindow:          t.fc.getInFlowWindow(),
+		RemoteFlowControlWindow:         t.sendQuotaPool.getOutFlowWindow(),
 		//socket options
 		Local:  t.localAddr,
 		Remote: t.remoteAddr,
