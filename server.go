@@ -105,6 +105,7 @@ type Server struct {
 	doneOnce sync.Once
 	serveWG  sync.WaitGroup // counts active Serve goroutines for GracefulStop
 
+	channelzRemoveOnce  sync.Once
 	channelzID          int64 // channelz unique identification number
 	czmu                sync.RWMutex
 	callsStarted        int64
@@ -480,12 +481,6 @@ func (l *listenSocket) ChannelzMetric() *channelz.SocketInternalMetric {
 	return &channelz.SocketInternalMetric{}
 }
 
-func (l *listenSocket) SetChannelzID(id int64) {
-	// no lock is needed here, since SetChannelzID is guaranteed to be called before
-	// channelzID field is accessed.
-	l.channelzID = id
-}
-
 func (l *listenSocket) Close() error {
 	err := l.Listener.Close()
 	if channelz.IsOn() {
@@ -519,6 +514,11 @@ func (s *Server) Serve(lis net.Listener) error {
 		case <-s.quit:
 			<-s.done
 		default:
+			s.channelzRemoveOnce.Do(func() {
+				if channelz.IsOn() {
+					channelz.RemoveEntry(s.channelzID)
+				}
+			})
 		}
 	}()
 
@@ -1285,9 +1285,12 @@ func (s *Server) Stop() {
 		})
 	}()
 
-	if channelz.IsOn() {
-		channelz.RemoveEntry(s.channelzID)
-	}
+	s.channelzRemoveOnce.Do(func() {
+		if channelz.IsOn() {
+			channelz.RemoveEntry(s.channelzID)
+		}
+	})
+
 	s.mu.Lock()
 	if channelz.IsOn() {
 		channelz.RemoveEntry(s.channelzID)
@@ -1329,9 +1332,11 @@ func (s *Server) GracefulStop() {
 		})
 	}()
 
-	if channelz.IsOn() {
-		channelz.RemoveEntry(s.channelzID)
-	}
+	s.channelzRemoveOnce.Do(func() {
+		if channelz.IsOn() {
+			channelz.RemoveEntry(s.channelzID)
+		}
+	})
 	s.mu.Lock()
 	if s.conns == nil {
 		s.mu.Unlock()

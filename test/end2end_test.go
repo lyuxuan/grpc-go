@@ -1063,18 +1063,18 @@ func testServerGoAwayPendingRPC(t *testing.T, e env) {
 		close(ch)
 	}()
 	// Loop until the server side GoAway signal is propagated to the client.
-	abort := false
-	time.AfterFunc(time.Second, func() { abort = true })
-	for !abort {
+	start := time.Now()
+	errored := false
+	for time.Since(start) < time.Second {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-		if _, err := tc.EmptyCall(ctx, &testpb.Empty{}, grpc.FailFast(false)); err != nil {
-			cancel()
+		_, err := tc.EmptyCall(ctx, &testpb.Empty{}, grpc.FailFast(false))
+		cancel()
+		if err != nil {
+			errored = true
 			break
 		}
-		cancel()
 	}
-	// Don't bother stopping the timer; it will have no effect past here.
-	if abort {
+	if !errored {
 		t.Fatalf("GoAway never received by client")
 	}
 	respParam := []*testpb.ResponseParameters{{Size: 1}}
@@ -6118,4 +6118,98 @@ func TestServeExitsWhenListenerClosed(t *testing.T) {
 	case <-timer.C:
 		t.Fatalf("Serve did not return after %v", timeout)
 	}
+}
+
+func TestClientDoesntDeadlockWhileWritingErrornousLargeMessages(t *testing.T) {
+	defer leakcheck.Check(t)
+	for _, e := range listTestEnv() {
+		if e.httpHandler {
+			continue
+		}
+		testClientDoesntDeadlockWhileWritingErrornousLargeMessages(t, e)
+	}
+}
+
+func testClientDoesntDeadlockWhileWritingErrornousLargeMessages(t *testing.T, e env) {
+	te := newTest(t, e)
+	te.userAgent = testAppUA
+	smallSize := 1024
+	te.maxServerReceiveMsgSize = &smallSize
+	te.startServer(&testServer{security: e.security})
+	defer te.tearDown()
+	tc := testpb.NewTestServiceClient(te.clientConn())
+	payload, err := newPayload(testpb.PayloadType_COMPRESSABLE, 1048576)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &testpb.SimpleRequest{
+		ResponseType: testpb.PayloadType_COMPRESSABLE,
+		Payload:      payload,
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Second*10))
+				defer cancel()
+				if _, err := tc.UnaryCall(ctx, req); status.Code(err) != codes.ResourceExhausted {
+					t.Errorf("TestService/UnaryCall(_,_) = _. %v, want code: %s", err, codes.ResourceExhausted)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+const clientAlwaysFailCredErrorMsg = "clientAlwaysFailCred always fails"
+
+var errClientAlwaysFailCred = errors.New(clientAlwaysFailCredErrorMsg)
+
+type clientAlwaysFailCred struct{}
+
+func (c clientAlwaysFailCred) ClientHandshake(ctx context.Context, addr string, rawConn net.Conn) (net.Conn, credentials.AuthInfo, error) {
+	return nil, nil, errClientAlwaysFailCred
+}
+func (c clientAlwaysFailCred) ServerHandshake(rawConn net.Conn) (net.Conn, credentials.AuthInfo, error) {
+	return rawConn, nil, nil
+}
+func (c clientAlwaysFailCred) Info() credentials.ProtocolInfo {
+	return credentials.ProtocolInfo{}
+}
+func (c clientAlwaysFailCred) Clone() credentials.TransportCredentials {
+	return nil
+}
+func (c clientAlwaysFailCred) OverrideServerName(s string) error {
+	return nil
+}
+
+func TestFailFastRPCErrorOnBadCertificates(t *testing.T) {
+	te := newTest(t, env{name: "bad-cred", network: "tcp", security: "clientAlwaysFailCred", balancer: "round_robin"})
+	te.startServer(&testServer{security: te.e.security})
+	defer te.tearDown()
+
+	opts := []grpc.DialOption{grpc.WithTransportCredentials(clientAlwaysFailCred{})}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	cc, err := grpc.DialContext(ctx, te.srvAddr, opts...)
+	if err != nil {
+		t.Fatalf("Dial(_) = %v, want %v", err, nil)
+	}
+	defer cc.Close()
+
+	tc := testpb.NewTestServiceClient(cc)
+	for i := 0; i < 1000; i++ {
+		// This loop runs for at most 1 second. The first several RPCs will fail
+		// with Unavailable because the connection hasn't started. When the
+		// first connection failed with creds error, the next RPC should also
+		// fail with the expected error.
+		if _, err = tc.EmptyCall(context.Background(), &testpb.Empty{}); strings.Contains(err.Error(), clientAlwaysFailCredErrorMsg) {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	te.t.Fatalf("TestService/EmptyCall(_, _) = _, %v, want err.Error() contains %q", err, clientAlwaysFailCredErrorMsg)
 }

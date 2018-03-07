@@ -252,7 +252,7 @@ func TestCZServerSocketRegistrationAndDeletion(t *testing.T) {
 	if len(ns) != num {
 		t.Fatalf("There should be %d normal sockets not %d", num, len(ns))
 	}
-	// channelz.PrintMap()
+
 	ccs[len(ccs)-1].Close()
 	time.Sleep(10 * time.Millisecond)
 
@@ -283,37 +283,22 @@ func TestCZServerListenSocketDeletion(t *testing.T) {
 	lis.Close()
 	time.Sleep(10 * time.Millisecond)
 	ss, _ = channelz.GetServers(0)
-	if len(ss) != 1 {
-		t.Fatalf("There should only be one server, not %d", len(ss))
-	}
-	if len(ss[0].ListenSockets) != 0 {
-		t.Fatalf("There should only be 0 server listen socket, not %d", len(ss[0].ListenSockets))
+	if len(ss) != 0 {
+		t.Fatalf("There should only be 0 server, not %d", len(ss))
 	}
 	s.Stop()
 }
 
-type dummyChannel struct {
-	channelzID int64
-}
+type dummyChannel struct{}
 
 func (d *dummyChannel) ChannelzMetric() *channelz.ChannelInternalMetric {
 	return &channelz.ChannelInternalMetric{}
 }
 
-func (d *dummyChannel) SetChannelzID(id int64) {
-	d.channelzID = id
-}
-
-type dummySocket struct {
-	channelzID int64
-}
+type dummySocket struct{}
 
 func (d *dummySocket) ChannelzMetric() *channelz.SocketInternalMetric {
 	return &channelz.SocketInternalMetric{}
-}
-
-func (d *dummySocket) SetChannelzID(id int64) {
-	d.channelzID = id
 }
 
 func TestCZRecusivelyDeletionOfEntry(t *testing.T) {
