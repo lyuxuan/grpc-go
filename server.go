@@ -478,7 +478,9 @@ type listenSocket struct {
 }
 
 func (l *listenSocket) ChannelzMetric() *channelz.SocketInternalMetric {
-	return &channelz.SocketInternalMetric{}
+	return &channelz.SocketInternalMetric{
+		LocalAddr: l.Listener.Addr(),
+	}
 }
 
 func (l *listenSocket) Close() error {

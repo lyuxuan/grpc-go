@@ -542,8 +542,8 @@ func prettyPrintSocketMetric(s *channelz.SocketMetric) {
 	fmt.Printf("  LastMessageReceivedTimestamp: %+v\n", s.SocketData.LastMessageReceivedTimestamp)
 	fmt.Printf("  LocalFlowControlWindow: %+v\n", s.SocketData.LocalFlowControlWindow)
 	fmt.Printf("  RemoteFlowControlWindow: %+v\n", s.SocketData.RemoteFlowControlWindow)
-	fmt.Printf("  Local: %+v\n", s.SocketData.Local)
-	fmt.Printf("  Remote: %+v\n", s.SocketData.Remote)
+	fmt.Printf("  LocalAddr: %+v\n", s.SocketData.LocalAddr)
+	fmt.Printf("  RemoteAddr: %+v\n", s.SocketData.RemoteAddr)
 	fmt.Printf("  RemoteName: %+v\n", s.SocketData.RemoteName)
 	fmt.Println("}")
 }
@@ -1049,7 +1049,7 @@ func TestCZServerSocketMetricsStreamsAndMessagesCount(t *testing.T) {
 	ns, _ = channelz.GetServerSockets(ss[0].ID, 0)
 	sktData = ns[0].SocketData
 	if sktData.StreamsStarted != 4 || sktData.StreamsSucceeded != 3 || sktData.StreamsFailed != 1 || sktData.MessagesSent != 3 || sktData.MessagesReceived != 3 {
-		t.Fatalf("Server socket metric with ID %d, want (StreamsStarted, StreamsSucceeded, StreamsFailed, MessagesSent, MessagesReceived) = (4, 3,1, 3, 3), got (%d, %d, %d, %d)", ns[0].ID, sktData.StreamsStarted, sktData.StreamsSucceeded, sktData.MessagesSent, sktData.MessagesReceived)
+		t.Fatalf("Server socket metric with ID %d, want (StreamsStarted, StreamsSucceeded, StreamsFailed, MessagesSent, MessagesReceived) = (4, 3, 1, 3, 3), got (%d, %d, %d, %d, %d)", ns[0].ID, sktData.StreamsStarted, sktData.StreamsSucceeded, sktData.StreamsFailed, sktData.MessagesSent, sktData.MessagesReceived)
 	}
 }
 

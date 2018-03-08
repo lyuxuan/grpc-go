@@ -224,8 +224,8 @@ type SocketInternalMetric struct {
 	LocalFlowControlWindow           int64
 	RemoteFlowControlWindow          int64
 	//socket options
-	Local  net.Addr
-	Remote net.Addr
+	LocalAddr  net.Addr
+	RemoteAddr net.Addr
 	// Security
 	RemoteName string
 }

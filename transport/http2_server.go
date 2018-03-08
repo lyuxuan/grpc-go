@@ -1255,8 +1255,8 @@ func (t *http2Server) ChannelzMetric() *channelz.SocketInternalMetric {
 		LocalFlowControlWindow:           t.fc.getInFlowWindow(),
 		RemoteFlowControlWindow:          t.sendQuotaPool.getOutFlowWindow(),
 		//socket options
-		Local:  t.localAddr,
-		Remote: t.remoteAddr,
+		LocalAddr:  t.localAddr,
+		RemoteAddr: t.remoteAddr,
 		// Security
 		// RemoteName :
 	}
