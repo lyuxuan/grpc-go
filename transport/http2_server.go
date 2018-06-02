@@ -956,7 +956,7 @@ func (t *http2Server) Close() error {
 
 // closeStream clears the footprint of a stream when the stream is not needed
 // any more.
-func (t *http2Server) closeStream(s *Stream, rst bool, rstCode http2.ErrCode, hdr *headerFrame, eosReceived bool) {
+func (t *http2Server) closeStream(s *Stream, rst bool, rstCode http2.ErrCode, hdr *headerFrame, sendEOS bool) {
 	if s.swapState(streamDone) == streamDone {
 		// If the stream was already done, return.
 		return
@@ -980,7 +980,7 @@ func (t *http2Server) closeStream(s *Stream, rst bool, rstCode http2.ErrCode, hd
 			t.mu.Unlock()
 			if channelz.IsOn() {
 				t.czmu.Lock()
-				if eosReceived {
+				if sendEOS {
 					t.streamsSucceeded++
 				} else {
 					t.streamsFailed++

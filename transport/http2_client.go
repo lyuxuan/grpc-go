@@ -867,7 +867,7 @@ func (t *http2Client) handleData(f *http2.DataFrame) {
 	}
 	if size > 0 {
 		if err := s.fc.onData(size); err != nil {
-			t.closeStream(s, io.EOF, true, http2.ErrCodeFlowControl, status.New(codes.Internal, err.Error()), nil, false)
+			t.closeStream(s, io.EOF, true, http2.ErrCodeFlowControl, status.New(codes.Internal, err.Error()), nil, f.FrameHeader.Flags.Has(http2.FlagDataEndStream))
 			return
 		}
 		if f.Header().Flags.Has(http2.FlagDataPadded) {
