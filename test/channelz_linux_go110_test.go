@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc/channelz"
+	_ "google.golang.org/grpc/channelz/socketopt"
 	testpb "google.golang.org/grpc/test/grpc_testing"
 	"google.golang.org/grpc/test/leakcheck"
 )
