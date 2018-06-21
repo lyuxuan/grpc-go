@@ -35,10 +35,10 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
 
-	"google.golang.org/grpc/channelz"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/grpclog"
+	"google.golang.org/grpc/internal/channelz"
 	"google.golang.org/grpc/internal/grpcrand"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
@@ -416,6 +416,11 @@ func (t *http2Server) operateHeaders(frame *http2.MetaHeadersFrame, handle func(
 			t.updateWindow(s, uint32(n))
 		},
 	}
+	// Register the stream with loopy.
+	t.controlBuf.put(&registerStream{
+		streamID: s.id,
+		wq:       s.wq,
+	})
 	handle(s)
 	return
 }
@@ -733,7 +738,6 @@ func (t *http2Server) writeHeaderLocked(s *Stream) {
 		onWrite: func() {
 			atomic.StoreUint32(&t.resetPingStrikes, 1)
 		},
-		wq: s.wq,
 	})
 	if t.stats != nil {
 		// Note: WireLength is not set in outHeader.
@@ -1087,11 +1091,13 @@ func (t *http2Server) ChannelzMetric() *channelz.SocketInternalMetric {
 		LastMessageSentTimestamp:         t.lastMsgSent,
 		LastMessageReceivedTimestamp:     t.lastMsgRecv,
 		LocalFlowControlWindow:           int64(t.fc.getSize()),
-		//socket options
-		LocalAddr:  t.localAddr,
-		RemoteAddr: t.remoteAddr,
-		// Security
+		SocketOptions:                    channelz.GetSocketOption(t.conn),
+		LocalAddr:                        t.localAddr,
+		RemoteAddr:                       t.remoteAddr,
 		// RemoteName :
+	}
+	if au, ok := t.authInfo.(credentials.ChannelzSecurityInfo); ok {
+		s.Security = au.GetSecurityValue()
 	}
 	t.czmu.RUnlock()
 	s.RemoteFlowControlWindow = t.getOutFlowWindow()

@@ -1,6 +1,8 @@
+// +build !linux !go1.9 appengine
+
 /*
  *
- * Copyright 2017 gRPC authors.
+ * Copyright 2018 gRPC authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,14 +18,9 @@
  *
  */
 
-package grpc
+package channelz
 
-import "testing"
-
-func TestBackoffConfigDefaults(t *testing.T) {
-	b := BackoffConfig{}
-	setDefaults(&b)
-	if b != DefaultBackoffConfig {
-		t.Fatalf("expected BackoffConfig to pickup default parameters: %v != %v", b, DefaultBackoffConfig)
-	}
+// GetSocketOption gets the socket option info of the conn.
+func GetSocketOption(c interface{}) *SocketOptionData {
+	return nil
 }
