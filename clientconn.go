@@ -145,9 +145,9 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 
 	if channelz.IsOn() {
 		if cc.dopts.channelzParentID != 0 {
-			cc.channelzID = channelz.RegisterChannel(cc, cc.dopts.channelzParentID, target)
+			cc.channelzID = channelz.RegisterChannel(cc.channelzMetric, cc.dopts.channelzParentID, target)
 		} else {
-			cc.channelzID = channelz.RegisterChannel(cc, 0, target)
+			cc.channelzID = channelz.RegisterChannel(cc.channelzMetric, 0, target)
 		}
 	}
 
@@ -544,7 +544,7 @@ func (cc *ClientConn) newAddrConn(addrs []resolver.Address) (*addrConn, error) {
 		return nil, ErrClientConnClosing
 	}
 	if channelz.IsOn() {
-		ac.channelzID = channelz.RegisterSubChannel(ac, cc.channelzID, "")
+		ac.channelzID = channelz.RegisterSubChannel(ac.channelzMetric, cc.channelzID, "")
 	}
 	cc.conns[ac] = struct{}{}
 	cc.mu.Unlock()
@@ -564,9 +564,8 @@ func (cc *ClientConn) removeAddrConn(ac *addrConn, err error) {
 	ac.tearDown(err)
 }
 
-// ChannelzMetric returns ChannelInternalMetric of current ClientConn.
-// This is an EXPERIMENTAL API.
-func (cc *ClientConn) ChannelzMetric() *channelz.ChannelInternalMetric {
+// channelzMetric returns ChannelInternalMetric of current ClientConn.
+func (cc *ClientConn) channelzMetric() *channelz.ChannelInternalMetric {
 	state := cc.GetState()
 	cc.czmu.RLock()
 	defer cc.czmu.RUnlock()
@@ -1187,7 +1186,7 @@ func (ac *addrConn) getState() connectivity.State {
 	return ac.state
 }
 
-func (ac *addrConn) ChannelzMetric() *channelz.ChannelInternalMetric {
+func (ac *addrConn) channelzMetric() *channelz.ChannelInternalMetric {
 	ac.mu.Lock()
 	addr := ac.curAddr.Addr
 	ac.mu.Unlock()

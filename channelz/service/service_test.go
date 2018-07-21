@@ -305,7 +305,7 @@ func TestGetTopChannels(t *testing.T) {
 	}
 	channelz.NewChannelzStorage()
 	for _, c := range tcs {
-		channelz.RegisterChannel(c, 0, "")
+		channelz.RegisterChannel(c.ChannelzMetric, 0, "")
 	}
 	s := newCZServer()
 	resp, _ := s.GetTopChannels(context.Background(), &channelzpb.GetTopChannelsRequest{StartChannelId: 0})
@@ -318,7 +318,7 @@ func TestGetTopChannels(t *testing.T) {
 		}
 	}
 	for i := 0; i < 50; i++ {
-		channelz.RegisterChannel(tcs[0], 0, "")
+		channelz.RegisterChannel(tcs[0].ChannelzMetric, 0, "")
 	}
 	resp, _ = s.GetTopChannels(context.Background(), &channelzpb.GetTopChannelsRequest{StartChannelId: 0})
 	if resp.GetEnd() {
@@ -349,7 +349,7 @@ func TestGetServers(t *testing.T) {
 	}
 	channelz.NewChannelzStorage()
 	for _, s := range ss {
-		channelz.RegisterServer(s, "")
+		channelz.RegisterServer(s.ChannelzMetric, "")
 	}
 	svr := newCZServer()
 	resp, _ := svr.GetServers(context.Background(), &channelzpb.GetServersRequest{StartServerId: 0})
@@ -362,7 +362,7 @@ func TestGetServers(t *testing.T) {
 		}
 	}
 	for i := 0; i < 50; i++ {
-		channelz.RegisterServer(ss[0], "")
+		channelz.RegisterServer(ss[0].ChannelzMetric, "")
 	}
 	resp, _ = svr.GetServers(context.Background(), &channelzpb.GetServersRequest{StartServerId: 0})
 	if resp.GetEnd() {
@@ -372,7 +372,7 @@ func TestGetServers(t *testing.T) {
 
 func TestGetServerSockets(t *testing.T) {
 	channelz.NewChannelzStorage()
-	svrID := channelz.RegisterServer(&dummyServer{}, "")
+	svrID := channelz.RegisterServer(func() *channelz.ServerInternalMetric { return &channelz.ServerInternalMetric{} }, "")
 	refNames := []string{"listen socket 1", "normal socket 1", "normal socket 2"}
 	ids := make([]int64, 3)
 	ids[0] = channelz.RegisterListenSocket(&dummySocket{}, svrID, refNames[0])
@@ -405,10 +405,10 @@ func TestGetChannel(t *testing.T) {
 	channelz.NewChannelzStorage()
 	refNames := []string{"top channel 1", "nested channel 1", "nested channel 2", "nested channel 3"}
 	ids := make([]int64, 4)
-	ids[0] = channelz.RegisterChannel(&dummyChannel{}, 0, refNames[0])
-	ids[1] = channelz.RegisterChannel(&dummyChannel{}, ids[0], refNames[1])
-	ids[2] = channelz.RegisterSubChannel(&dummyChannel{}, ids[0], refNames[2])
-	ids[3] = channelz.RegisterChannel(&dummyChannel{}, ids[1], refNames[3])
+	ids[0] = channelz.RegisterChannel(func() *channelz.ChannelInternalMetric { return &channelz.ChannelInternalMetric{} }, 0, refNames[0])
+	ids[1] = channelz.RegisterChannel(func() *channelz.ChannelInternalMetric { return &channelz.ChannelInternalMetric{} }, ids[0], refNames[1])
+	ids[2] = channelz.RegisterSubChannel(func() *channelz.ChannelInternalMetric { return &channelz.ChannelInternalMetric{} }, ids[0], refNames[2])
+	ids[3] = channelz.RegisterChannel(func() *channelz.ChannelInternalMetric { return &channelz.ChannelInternalMetric{} }, ids[1], refNames[3])
 	svr := newCZServer()
 	resp, _ := svr.GetChannel(context.Background(), &channelzpb.GetChannelRequest{ChannelId: ids[0]})
 	metrics := resp.GetChannel()
@@ -433,8 +433,8 @@ func TestGetSubChannel(t *testing.T) {
 	channelz.NewChannelzStorage()
 	refNames := []string{"top channel 1", "sub channel 1", "socket 1", "socket 2"}
 	ids := make([]int64, 4)
-	ids[0] = channelz.RegisterChannel(&dummyChannel{}, 0, refNames[0])
-	ids[1] = channelz.RegisterSubChannel(&dummyChannel{}, ids[0], refNames[1])
+	ids[0] = channelz.RegisterChannel(func() *channelz.ChannelInternalMetric { return &channelz.ChannelInternalMetric{} }, 0, refNames[0])
+	ids[1] = channelz.RegisterSubChannel(func() *channelz.ChannelInternalMetric { return &channelz.ChannelInternalMetric{} }, ids[0], refNames[1])
 	ids[2] = channelz.RegisterNormalSocket(&dummySocket{}, ids[1], refNames[2])
 	ids[3] = channelz.RegisterNormalSocket(&dummySocket{}, ids[1], refNames[3])
 	svr := newCZServer()
@@ -524,7 +524,7 @@ func TestGetSocket(t *testing.T) {
 	}
 	svr := newCZServer()
 	ids := make([]int64, len(ss))
-	svrID := channelz.RegisterServer(&dummyServer{}, "")
+	svrID := channelz.RegisterServer(func() *channelz.ServerInternalMetric { return &channelz.ServerInternalMetric{} }, "")
 	for i, s := range ss {
 		ids[i] = channelz.RegisterNormalSocket(s, svrID, strconv.Itoa(i))
 	}

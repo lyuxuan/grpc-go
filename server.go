@@ -374,7 +374,7 @@ func NewServer(opt ...ServerOption) *Server {
 	}
 
 	if channelz.IsOn() {
-		s.channelzID = channelz.RegisterServer(s, "")
+		s.channelzID = channelz.RegisterServer(s.channelzMetric, "")
 	}
 	return s
 }
@@ -815,7 +815,7 @@ func (s *Server) removeConn(c io.Closer) {
 
 // ChannelzMetric returns ServerInternalMetric of current server.
 // This is an EXPERIMENTAL API.
-func (s *Server) ChannelzMetric() *channelz.ServerInternalMetric {
+func (s *Server) channelzMetric() *channelz.ServerInternalMetric {
 	s.czmu.RLock()
 	defer s.czmu.RUnlock()
 	return &channelz.ServerInternalMetric{

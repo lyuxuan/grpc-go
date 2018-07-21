@@ -141,15 +141,12 @@ type ChannelInternalMetric struct {
 	//TODO: trace
 }
 
-// Channel is the interface that should be satisfied in order to be tracked by
-// channelz as Channel or SubChannel.
-type Channel interface {
-	ChannelzMetric() *ChannelInternalMetric
-}
+type ChannelMetricFunc func() *ChannelInternalMetric
+type ServerMetricFunc func() *ServerInternalMetric
 
 type channel struct {
 	refName     string
-	c           Channel
+	metricFunc  ChannelMetricFunc
 	closeCalled bool
 	nestedChans map[int64]string
 	subChans    map[int64]string
@@ -193,7 +190,7 @@ func (c *channel) deleteSelfIfReady() {
 
 type subChannel struct {
 	refName     string
-	c           Channel
+	metricFunc  ChannelMetricFunc
 	closeCalled bool
 	sockets     map[int64]string
 	id          int64
@@ -373,15 +370,9 @@ type ServerInternalMetric struct {
 	//TODO: trace
 }
 
-// Server is the interface to be satisfied in order to be tracked by channelz as
-// Server.
-type Server interface {
-	ChannelzMetric() *ServerInternalMetric
-}
-
 type server struct {
 	refName       string
-	s             Server
+	metricFunc    ServerMetricFunc
 	closeCalled   bool
 	sockets       map[int64]string
 	listenSockets map[int64]string

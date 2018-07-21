@@ -137,11 +137,11 @@ func GetSocket(id int64) *SocketMetric {
 // as its reference name, and add it to the child list of its parent (identified
 // by pid). pid = 0 means no parent. It returns the unique channelz tracking id
 // assigned to this channel.
-func RegisterChannel(c Channel, pid int64, ref string) int64 {
+func RegisterChannel(metricFunc ChannelMetricFunc, pid int64, ref string) int64 {
 	id := idGen.genID()
 	cn := &channel{
 		refName:     ref,
-		c:           c,
+		metricFunc:  metricFunc,
 		subChans:    make(map[int64]string),
 		nestedChans: make(map[int64]string),
 		id:          id,
@@ -158,18 +158,18 @@ func RegisterChannel(c Channel, pid int64, ref string) int64 {
 // RegisterSubChannel registers the given channel c in channelz database with ref
 // as its reference name, and add it to the child list of its parent (identified
 // by pid). It returns the unique channelz tracking id assigned to this subchannel.
-func RegisterSubChannel(c Channel, pid int64, ref string) int64 {
+func RegisterSubChannel(metricFunc ChannelMetricFunc, pid int64, ref string) int64 {
 	if pid == 0 {
 		grpclog.Error("a SubChannel's parent id cannot be 0")
 		return 0
 	}
 	id := idGen.genID()
 	sc := &subChannel{
-		refName: ref,
-		c:       c,
-		sockets: make(map[int64]string),
-		id:      id,
-		pid:     pid,
+		refName:    ref,
+		metricFunc: metricFunc,
+		sockets:    make(map[int64]string),
+		id:         id,
+		pid:        pid,
 	}
 	db.get().addSubChannel(id, sc, pid, ref)
 	return id
@@ -177,11 +177,11 @@ func RegisterSubChannel(c Channel, pid int64, ref string) int64 {
 
 // RegisterServer registers the given server s in channelz database. It returns
 // the unique channelz tracking id assigned to this server.
-func RegisterServer(s Server, ref string) int64 {
+func RegisterServer(metricFunc ServerMetricFunc, ref string) int64 {
 	id := idGen.genID()
 	svr := &server{
 		refName:       ref,
-		s:             s,
+		metricFunc:    metricFunc,
 		sockets:       make(map[int64]string),
 		listenSockets: make(map[int64]string),
 		id:            id,
@@ -405,7 +405,7 @@ func (c *channelMap) GetTopChannels(id int64) ([]*ChannelMetric, bool) {
 	}
 
 	for i, cn := range cns {
-		t[i].ChannelData = cn.c.ChannelzMetric()
+		t[i].ChannelData = cn.metricFunc()
 		t[i].ID = cn.id
 		t[i].RefName = cn.refName
 	}
@@ -447,7 +447,7 @@ func (c *channelMap) GetServers(id int64) ([]*ServerMetric, bool) {
 	}
 
 	for i, svr := range ss {
-		s[i].ServerData = svr.s.ChannelzMetric()
+		s[i].ServerData = svr.metricFunc()
 		s[i].ID = svr.id
 		s[i].RefName = svr.refName
 	}
@@ -515,7 +515,7 @@ func (c *channelMap) GetChannel(id int64) *ChannelMetric {
 	cm.NestedChans = copyMap(cn.nestedChans)
 	cm.SubChans = copyMap(cn.subChans)
 	c.mu.RUnlock()
-	cm.ChannelData = cn.c.ChannelzMetric()
+	cm.ChannelData = cn.metricFunc()
 	cm.ID = cn.id
 	cm.RefName = cn.refName
 	return cm
@@ -533,7 +533,7 @@ func (c *channelMap) GetSubChannel(id int64) *SubChannelMetric {
 	}
 	cm.Sockets = copyMap(sc.sockets)
 	c.mu.RUnlock()
-	cm.ChannelData = sc.c.ChannelzMetric()
+	cm.ChannelData = sc.metricFunc()
 	cm.ID = sc.id
 	cm.RefName = sc.refName
 	return cm

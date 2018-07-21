@@ -369,9 +369,9 @@ func TestCZRecusivelyDeletionOfEntry(t *testing.T) {
 	//    v             v
 	// Socket1       Socket2
 	channelz.NewChannelzStorage()
-	topChanID := channelz.RegisterChannel(&dummyChannel{}, 0, "")
-	subChanID1 := channelz.RegisterSubChannel(&dummyChannel{}, topChanID, "")
-	subChanID2 := channelz.RegisterSubChannel(&dummyChannel{}, topChanID, "")
+	topChanID := channelz.RegisterChannel(nil, 0, "")
+	subChanID1 := channelz.RegisterSubChannel(nil, topChanID, "")
+	subChanID2 := channelz.RegisterSubChannel(nil, topChanID, "")
 	sktID1 := channelz.RegisterNormalSocket(&dummySocket{}, subChanID1, "")
 	sktID2 := channelz.RegisterNormalSocket(&dummySocket{}, subChanID1, "")
 

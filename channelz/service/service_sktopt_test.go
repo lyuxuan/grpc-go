@@ -138,7 +138,7 @@ func TestGetSocketOptions(t *testing.T) {
 	}
 	svr := newCZServer()
 	ids := make([]int64, len(ss))
-	svrID := channelz.RegisterServer(&dummyServer{}, "")
+	svrID := channelz.RegisterServer(func() *channelz.ServerInternalMetric { return &channelz.ServerInternalMetric{} }, "")
 	for i, s := range ss {
 		ids[i] = channelz.RegisterNormalSocket(s, svrID, strconv.Itoa(i))
 	}
