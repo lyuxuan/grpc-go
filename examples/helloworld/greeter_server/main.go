@@ -16,7 +16,7 @@
  *
  */
 
-//go:generate protoc -I ../helloworld --go_out=plugins=grpc:../helloworld ../helloworld/helloworld.proto
+//go:generate protoc -I ../../proto/helloworld --go_out=plugins=grpc:../../proto/helloworld ../../proto/helloworld/helloworld.proto
 
 package main
 
@@ -27,6 +27,7 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
+	pb2 "google.golang.org/grpc/examples/proto/helloworld"
 	"google.golang.org/grpc/reflection"
 )
 
@@ -42,6 +43,14 @@ func (s *server) SayHello(ctx context.Context, in *pb.HelloRequest) (*pb.HelloRe
 	return &pb.HelloReply{Message: "Hello " + in.Name}, nil
 }
 
+// server is used to implement helloworld.GreeterServer.
+type server2 struct{}
+
+// SayHello implements helloworld.GreeterServer
+func (s *server2) SayHello(ctx context.Context, in *pb2.HelloRequest) (*pb2.HelloReply, error) {
+	return &pb2.HelloReply{Message: "Hello " + in.Name}, nil
+}
+
 func main() {
 	lis, err := net.Listen("tcp", port)
 	if err != nil {
@@ -49,6 +58,8 @@ func main() {
 	}
 	s := grpc.NewServer()
 	pb.RegisterGreeterServer(s, &server{})
+	s2 := grpc.NewServer()
+	pb2.RegisterGreeterServer(s2, &server2{})
 	// Register reflection service on gRPC server.
 	reflection.Register(s)
 	if err := s.Serve(lis); err != nil {

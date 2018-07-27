@@ -58,7 +58,12 @@ const (
 	defaultServerMaxSendMessageSize    = math.MaxInt32
 )
 
+type MethodHandler = methodHandler
 type methodHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor UnaryServerInterceptor) (interface{}, error)
+
+var unimplementedMethodHandler methodHandler = func(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor UnaryServerInterceptor) (interface{}, error) {
+	return nil, status.Error(codes.Unimplemented, "")
+}
 
 // MethodDesc represents an RPC service's method specification.
 type MethodDesc struct {
@@ -75,6 +80,44 @@ type ServiceDesc struct {
 	Methods     []MethodDesc
 	Streams     []StreamDesc
 	Metadata    interface{}
+}
+
+type MethodDescTemplate struct {
+	HandlerInit func(interface{}) MethodHandler
+}
+
+type StreamDescTemplate struct {
+	HandlerInit func(interface{}) StreamHandler
+
+	// At least one of these is true.
+	ServerStreams bool
+	ClientStreams bool
+}
+
+type ServiceDescTemplate struct {
+	ServiceName string
+	Methods     map[string]*MethodDescTemplate
+	Streams     map[string]*StreamDescTemplate
+	Metadata    interface{}
+}
+
+func (s *ServiceDescTemplate) deepcopy() *ServiceDescTemplate {
+	newTmpl := &ServiceDescTemplate{
+		ServiceName: s.ServiceName,
+		Methods:     make(map[string]*MethodDescTemplate),
+		Streams:     make(map[string]*StreamDescTemplate),
+		// Pointer type Metadata will be shared across all copies.
+		Metadata: s.Metadata,
+	}
+	for k, v := range s.Methods {
+		mdt := *v
+		newTmpl.Methods[k] = &mdt
+	}
+	for k, v := range s.Streams {
+		sdt := *v
+		newTmpl.Streams[k] = &sdt
+	}
+	return newTmpl
 }
 
 // service consists of the information of the server serving this service and
@@ -95,8 +138,9 @@ type Server struct {
 	conns  map[io.Closer]bool
 	serve  bool
 	drain  bool
-	cv     *sync.Cond          // signaled when connections close for GracefulStop
-	m      map[string]*service // service name -> service info
+	cv     *sync.Cond                      // signaled when connections close for GracefulStop
+	m      map[string]*service             // service name -> service info
+	tmpl   map[string]*ServiceDescTemplate // service name -> service template info
 	events trace.EventLog
 
 	quit               chan struct{}
@@ -364,6 +408,7 @@ func NewServer(opt ...ServerOption) *Server {
 		opts:  opts,
 		conns: make(map[io.Closer]bool),
 		m:     make(map[string]*service),
+		tmpl:  make(map[string]*ServiceDescTemplate),
 		quit:  make(chan struct{}),
 		done:  make(chan struct{}),
 	}
@@ -407,6 +452,140 @@ func (s *Server) RegisterService(sd *ServiceDesc, ss interface{}) {
 	s.register(sd, ss)
 }
 
+func (s *Server) RegisterMethod(path string, method interface{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if path != "" && path[0] == '/' {
+		path = path[1:]
+	}
+	pos := strings.LastIndex(path, "/")
+	if pos == -1 {
+		grpclog.Fatalf("grpc: Server.RegisterMethod mailformed path %q", path)
+		return
+	}
+	serviceName := path[:pos]
+	methodName := path[pos+1:]
+
+	s.printf("RegisterMethod(%q)", path)
+	if s.serve {
+		grpclog.Fatalf("grpc: Server.RegisterMethod after Server.Serve for %q", path)
+	}
+	if _, ok := s.tmpl[serviceName]; !ok {
+		cenrtralServiceDescConsult.mu.Lock()
+		tmpl, ok := cenrtralServiceDescConsult.tmpl[serviceName]
+		cenrtralServiceDescConsult.mu.Unlock()
+		if !ok {
+			grpclog.Fatalf("grpc: Server.RegisterMethod cannot find service registration for %q", serviceName)
+			return
+		}
+		s.tmpl[serviceName] = tmpl.deepcopy()
+	}
+
+	sdt := s.tmpl[serviceName]
+	if _, ok := s.m[serviceName]; !ok {
+		// no method has registered for this service yet
+		srv := &service{
+			md:    make(map[string]*MethodDesc),
+			sd:    make(map[string]*StreamDesc),
+			mdata: sdt.Metadata,
+		}
+		for k, v := range sdt.Methods {
+			srv.md[k] = &MethodDesc{
+				MethodName: k,
+			}
+			if k == methodName {
+				srv.md[k].Handler = v.HandlerInit(method)
+				// set to nil so the same method won't be registered again
+				v.HandlerInit = nil
+			} else {
+				srv.md[k].Handler = unimplementedMethodHandler
+			}
+		}
+
+		for k, v := range sdt.Streams {
+			srv.sd[k] = &StreamDesc{
+				StreamName:    k,
+				ServerStreams: v.ServerStreams,
+				ClientStreams: v.ClientStreams,
+			}
+			if k == methodName {
+				srv.sd[k].Handler = v.HandlerInit(method)
+				// set to nil so the same method won't be registered again
+				v.HandlerInit = nil
+			} else {
+				srv.sd[k].Handler = unimplementedStreamHandler
+			}
+		}
+		s.m[serviceName] = srv
+		fmt.Println(s.m)
+		return
+	}
+	// some method(s) has registered for this service.
+	srv := s.m[serviceName]
+	if _, ok := srv.md[methodName]; ok {
+		if sdt.Methods[methodName].HandlerInit == nil {
+			grpclog.Fatalf("grpc: Server.RegisterMethod found duplicate method registration for %q", path)
+			return
+		}
+		srv.md[methodName].Handler = sdt.Methods[methodName].HandlerInit(method)
+		sdt.Methods[methodName].HandlerInit = nil
+		return
+	}
+	if _, ok := srv.sd[methodName]; ok {
+		if sdt.Streams[methodName].HandlerInit == nil {
+			grpclog.Fatalf("grpc: Server.RegisterMethod found duplicate method registration for %q", path)
+			return
+		}
+		srv.sd[methodName].Handler = sdt.Streams[methodName].HandlerInit(method)
+		sdt.Streams[methodName].HandlerInit = nil
+	}
+}
+
+func (s *Server) PrintService() {
+	fmt.Println("print service")
+	fmt.Println(s.m)
+	for k, v := range s.m {
+		fmt.Println("service", k)
+		for mn, mh := range v.md {
+			fmt.Println(mn, mh)
+		}
+		for sn, sh := range v.sd {
+			fmt.Println(sn, sh)
+		}
+	}
+}
+func (s *Server) RegisterServiceDesc(sd *ServiceDescTemplate) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.printf("RegisterServiceTemplate(%q)", sd.ServiceName)
+	if s.serve {
+		grpclog.Fatalf("grpc: Server.RegisterServiceTemplate after Server.Serve for %q", sd.ServiceName)
+	}
+	if _, ok := s.m[sd.ServiceName]; ok {
+		grpclog.Fatalf("grpc: Server.RegisterServiceTemplate found duplicate service registration for %q", sd.ServiceName)
+	}
+	if _, ok := s.tmpl[sd.ServiceName]; ok {
+		grpclog.Fatalf("grpc: Server.RegisterServiceTemplate found duplicate service registration for %q", sd.ServiceName)
+	}
+	s.tmpl[sd.ServiceName] = sd
+}
+
+type centralServiceDescs struct {
+	mu   sync.Mutex
+	tmpl map[string]*ServiceDescTemplate
+}
+
+var cenrtralServiceDescConsult centralServiceDescs = centralServiceDescs{tmpl: make(map[string]*ServiceDescTemplate)}
+
+func RegisterServiceDesc(sd *ServiceDescTemplate) {
+	cenrtralServiceDescConsult.mu.Lock()
+	if _, ok := cenrtralServiceDescConsult.tmpl[sd.ServiceName]; ok {
+		grpclog.Fatalf("grpc: Server.RegisterServiceTemplate found duplicate service registration for %q", sd.ServiceName)
+	}
+	cenrtralServiceDescConsult.tmpl[sd.ServiceName] = sd
+	cenrtralServiceDescConsult.mu.Unlock()
+}
+
 func (s *Server) register(sd *ServiceDesc, ss interface{}) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -415,6 +594,9 @@ func (s *Server) register(sd *ServiceDesc, ss interface{}) {
 		grpclog.Fatalf("grpc: Server.RegisterService after Server.Serve for %q", sd.ServiceName)
 	}
 	if _, ok := s.m[sd.ServiceName]; ok {
+		grpclog.Fatalf("grpc: Server.RegisterService found duplicate service registration for %q", sd.ServiceName)
+	}
+	if _, ok := s.tmpl[sd.ServiceName]; ok {
 		grpclog.Fatalf("grpc: Server.RegisterService found duplicate service registration for %q", sd.ServiceName)
 	}
 	srv := &service{
@@ -1027,6 +1209,7 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 		return nil
 	}
 	ctx := NewContextWithServerTransportStream(stream.Context(), stream)
+
 	reply, appErr := md.Handler(srv.server, ctx, df, s.opts.unaryInt)
 	if appErr != nil {
 		appStatus, ok := status.FromError(appErr)
@@ -1082,6 +1265,62 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 	// Should the logging be in WriteStatus?  Should we ignore the WriteStatus
 	// error or allow the stats handler to see it?
 	return t.WriteStatus(stream, status.New(codes.OK, ""))
+}
+
+type fakeStreamInt struct {
+	unaryInt  UnaryServerInterceptor
+	unaryInfo *UnaryServerInfo
+	notify    chan struct{}
+	response  chan interface{}
+	err       chan error
+	result    chan error
+	ServerStream
+}
+
+func (f *fakeStreamInt) getResult() error {
+	return <-f.result
+}
+
+func (f *fakeStreamInt) RecvMsg(m interface{}) error {
+	err := f.ServerStream.RecvMsg(m)
+	if err != nil {
+		return err
+	}
+	// append stream to context?
+	go func() {
+		resp, err := f.unaryInt(f.ServerStream.Context(), m, f.unaryInfo, f.unaryHandler())
+		if err != nil {
+			f.ServerStream.SendMsg(resp)
+		}
+		f.result <- err
+	}()
+	select {
+	case <-f.notify:
+	case err := <-f.result:
+		return err
+	}
+	return nil
+}
+
+func (f *fakeStreamInt) SendMsg(m interface{}) error {
+	f.response <- m
+	return nil
+}
+
+func (f *fakeStreamInt) unaryHandler() UnaryHandler {
+	return func(ctx context.Context, req interface{}) (interface{}, error) {
+		f.notify <- struct{}{}
+		select {
+		case m := <-f.response:
+			return m, nil
+		case err := <-f.err:
+			return nil, err
+		}
+	}
+}
+
+func (f *fakeStreamInt) appErrored(err error) {
+	f.err <- err
 }
 
 func (s *Server) processStreamingRPC(t transport.ServerTransport, stream *transport.Stream, srv *service, sd *StreamDesc, trInfo *traceInfo) (err error) {
@@ -1174,6 +1413,22 @@ func (s *Server) processStreamingRPC(t transport.ServerTransport, stream *transp
 	}
 	if s.opts.streamInt == nil {
 		appErr = sd.Handler(server, ss)
+	} else if !sd.ClientStreams && !sd.ServerStreams && s.opts.unaryInt != nil {
+		streamInt := func(srv interface{}, ss ServerStream, info *StreamServerInfo, handler StreamHandler) error {
+			newSs := &fakeStreamInt{unaryInt: s.opts.unaryInt, unaryInfo: &UnaryServerInfo{}, ServerStream: ss}
+			err := handler(srv, newSs)
+			if err != nil {
+				newSs.appErrored(err)
+			}
+			return newSs.getResult()
+		}
+
+		info := &StreamServerInfo{
+			FullMethod:     stream.Method(),
+			IsClientStream: sd.ClientStreams,
+			IsServerStream: sd.ServerStreams,
+		}
+		appErr = streamInt(server, ss, info, sd.Handler)
 	} else {
 		info := &StreamServerInfo{
 			FullMethod:     stream.Method(),

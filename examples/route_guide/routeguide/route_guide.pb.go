@@ -483,34 +483,113 @@ type RouteGuideServer interface {
 }
 
 func RegisterRouteGuideServer(s *grpc.Server, srv RouteGuideServer) {
-	s.RegisterService(&_RouteGuide_serviceDesc, srv)
+	//s.RegisterService(&_RouteGuide_serviceDesc, srv)
+
+	//s.RegisterService(newRouteGuideServieDesc(srv), srv)
+
+	//s.RegisterServiceDesc(newRouteGuideServiceDescTemplate())
+	//s.RegisterMethod("/routeguide.RouteGuide/GetFeature", srv.GetFeature)
+	//s.RegisterMethod("/routeguide.RouteGuide/ListFeatures", srv.ListFeatures)
+	//s.RegisterMethod("/routeguide.RouteGuide/RecordRoute", srv.RecordRoute)
+	//s.RegisterMethod("/routeguide.RouteGuide/RouteChat", srv.RouteChat)
 }
 
-func _RouteGuide_GetFeature_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Point)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(RouteGuideServer).GetFeature(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/routeguide.RouteGuide/GetFeature",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(RouteGuideServer).GetFeature(ctx, req.(*Point))
-	}
-	return interceptor(ctx, in, info, handler)
+func init() {
+	grpc.RegisterServiceDesc(newRouteGuideServiceDescTemplate())
 }
 
-func _RouteGuide_ListFeatures_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(Rectangle)
-	if err := stream.RecvMsg(m); err != nil {
+//func getFeatureHandlerGen(f interface{}) grpc.MethodHandler {
+//	h, ok := f.(func(context.Context, *Point) (*Feature, error))
+//	if !ok {
+//		return nil
+//	}
+//	return func(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+//		in := new(Point)
+//		if err := dec(in); err != nil {
+//			return nil, err
+//		}
+//		if interceptor == nil {
+//			return h(ctx, in)
+//		}
+//		info := &grpc.UnaryServerInfo{
+//			Server:     nil, //turn into nil
+//			FullMethod: "/routeguide.RouteGuide/GetFeature",
+//		}
+//		handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+//			return h(ctx, req.(*Point))
+//		}
+//		return interceptor(ctx, in, info, handler)
+//	}
+//}
+
+func getFeatureHandlerGen(f interface{}) grpc.StreamHandler {
+	h, ok := f.(func(context.Context, *Point) (*Feature, error))
+	if !ok {
+		return nil
+	}
+	return func(srv interface{}, stream grpc.ServerStream) error {
+		in := new(Point)
+		if err := stream.RecvMsg(in); err != nil {
+			return err
+		}
+		reply, err := h(stream.Context(), in)
+		if reply != nil {
+			stream.SendMsg(reply)
+		}
 		return err
+		//if interceptor == nil {
+		//	return h(ctx, in)
+		//}
+		//info := &grpc.UnaryServerInfo{
+		//	Server:     nil, //turn into nil
+		//	FullMethod: "/routeguide.RouteGuide/GetFeature",
+		//}
+		//handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		//	return h(ctx, req.(*Point))
+		//}
+		//return interceptor(ctx, in, info, handler)
 	}
-	return srv.(RouteGuideServer).ListFeatures(m, &routeGuideListFeaturesServer{stream})
 }
+
+//func _RouteGuide_GetFeature_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+//	in := new(Point)
+//	if err := dec(in); err != nil {
+//		return nil, err
+//	}
+//	if interceptor == nil {
+//		return srv.(RouteGuideServer).GetFeature(ctx, in)
+//	}
+//	info := &grpc.UnaryServerInfo{
+//		Server:     srv,
+//		FullMethod: "/routeguide.RouteGuide/GetFeature",
+//	}
+//	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+//		return srv.(RouteGuideServer).GetFeature(ctx, req.(*Point))
+//	}
+//	return interceptor(ctx, in, info, handler)
+//}
+
+func listFeaturesHandlerGen(f interface{}) grpc.StreamHandler {
+	handler, ok := f.(func(*Rectangle, RouteGuide_ListFeaturesServer) error)
+	if !ok {
+		return nil
+	}
+	return func(svr interface{}, stream grpc.ServerStream) error {
+		m := new(Rectangle)
+		if err := stream.RecvMsg(m); err != nil {
+			return err
+		}
+		return handler(m, &routeGuideListFeaturesServer{stream})
+	}
+}
+
+//func _RouteGuide_ListFeatures_Handler(srv interface{}, stream grpc.ServerStream) error {
+//	m := new(Rectangle)
+//	if err := stream.RecvMsg(m); err != nil {
+//		return err
+//	}
+//	return srv.(RouteGuideServer).ListFeatures(m, &routeGuideListFeaturesServer{stream})
+//}
 
 type RouteGuide_ListFeaturesServer interface {
 	Send(*Feature) error
@@ -525,9 +604,19 @@ func (x *routeGuideListFeaturesServer) Send(m *Feature) error {
 	return x.ServerStream.SendMsg(m)
 }
 
-func _RouteGuide_RecordRoute_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(RouteGuideServer).RecordRoute(&routeGuideRecordRouteServer{stream})
+func recordRouteHandlerGen(f interface{}) grpc.StreamHandler {
+	handler, ok := f.(func(RouteGuide_RecordRouteServer) error)
+	if !ok {
+		return nil
+	}
+	return func(svr interface{}, stream grpc.ServerStream) error {
+		return handler(&routeGuideRecordRouteServer{stream})
+	}
 }
+
+//func _RouteGuide_RecordRoute_Handler(srv interface{}, stream grpc.ServerStream) error {
+//	return srv.(RouteGuideServer).RecordRoute(&routeGuideRecordRouteServer{stream})
+//}
 
 type RouteGuide_RecordRouteServer interface {
 	SendAndClose(*RouteSummary) error
@@ -551,9 +640,19 @@ func (x *routeGuideRecordRouteServer) Recv() (*Point, error) {
 	return m, nil
 }
 
-func _RouteGuide_RouteChat_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(RouteGuideServer).RouteChat(&routeGuideRouteChatServer{stream})
+func routeChatHandlerGen(f interface{}) grpc.StreamHandler {
+	handler, ok := f.(func(RouteGuide_RouteChatServer) error)
+	if !ok {
+		return nil
+	}
+	return func(svr interface{}, stream grpc.ServerStream) error {
+		return handler(&routeGuideRouteChatServer{stream})
+	}
 }
+
+//func _RouteGuide_RouteChat_Handler(srv interface{}, stream grpc.ServerStream) error {
+//	return srv.(RouteGuideServer).RouteChat(&routeGuideRouteChatServer{stream})
+//}
 
 type RouteGuide_RouteChatServer interface {
 	Send(*RouteNote) error
@@ -577,29 +676,91 @@ func (x *routeGuideRouteChatServer) Recv() (*RouteNote, error) {
 	return m, nil
 }
 
+func newRouteGuideServieDesc(impl RouteGuideServer) *grpc.ServiceDesc {
+	return &grpc.ServiceDesc{
+		ServiceName: "routeguide.RouteGuide",
+		HandlerType: (*RouteGuideServer)(nil),
+		//Methods: []grpc.MethodDesc{
+		//	{
+		//		MethodName: "GetFeature",
+		//		Handler:    getFeatureHandlerGen(impl.GetFeature),
+		//	},
+		//},
+		Streams: []grpc.StreamDesc{
+			{
+				StreamName:    "ListFeatures",
+				Handler:       listFeaturesHandlerGen(impl.ListFeatures),
+				ServerStreams: true,
+			},
+			{
+				StreamName:    "RecordRoute",
+				Handler:       recordRouteHandlerGen(impl.RecordRoute),
+				ClientStreams: true,
+			},
+			{
+				StreamName:    "RouteChat",
+				Handler:       routeChatHandlerGen(impl.RouteChat),
+				ServerStreams: true,
+				ClientStreams: true,
+			},
+		},
+		Metadata: "route_guide.proto",
+	}
+}
+
+func newRouteGuideServiceDescTemplate() *grpc.ServiceDescTemplate {
+	return &grpc.ServiceDescTemplate{
+		ServiceName: "routeguide.RouteGuide",
+		//Methods: map[string]*grpc.MethodDescTemplate{
+		//	"GetFeature": &grpc.MethodDescTemplate{
+		//		HandlerInit: getFeatureHandlerGen,
+		//	},
+		//},
+		Streams: map[string]*grpc.StreamDescTemplate{
+			"GetFeature": &grpc.StreamDescTemplate{
+				HandlerInit: getFeatureHandlerGen,
+			},
+			"ListFeatures": &grpc.StreamDescTemplate{
+				HandlerInit:   listFeaturesHandlerGen,
+				ServerStreams: true,
+			},
+			"RecordRoute": &grpc.StreamDescTemplate{
+				HandlerInit:   recordRouteHandlerGen,
+				ClientStreams: true,
+			},
+			"RouteChat": &grpc.StreamDescTemplate{
+				HandlerInit:   routeChatHandlerGen,
+				ServerStreams: true,
+				ClientStreams: true,
+			},
+		},
+		Metadata: "route_guide.proto",
+	}
+}
+
 var _RouteGuide_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "routeguide.RouteGuide",
 	HandlerType: (*RouteGuideServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
 			MethodName: "GetFeature",
-			Handler:    _RouteGuide_GetFeature_Handler,
+			//			Handler:    _RouteGuide_GetFeature_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "ListFeatures",
-			Handler:       _RouteGuide_ListFeatures_Handler,
+			StreamName: "ListFeatures",
+			//			Handler:       _RouteGuide_ListFeatures_Handler,
 			ServerStreams: true,
 		},
 		{
-			StreamName:    "RecordRoute",
-			Handler:       _RouteGuide_RecordRoute_Handler,
+			StreamName: "RecordRoute",
+			//			Handler:       _RouteGuide_RecordRoute_Handler,
 			ClientStreams: true,
 		},
 		{
-			StreamName:    "RouteChat",
-			Handler:       _RouteGuide_RouteChat_Handler,
+			StreamName: "RouteChat",
+			//			Handler:       _RouteGuide_RouteChat_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

@@ -47,6 +47,10 @@ import (
 // of the RPC.
 type StreamHandler func(srv interface{}, stream ServerStream) error
 
+var unimplementedStreamHandler = func(srv interface{}, stream ServerStream) error {
+	return status.Error(codes.Unimplemented, "")
+}
+
 // StreamDesc represents a streaming RPC service's method specification.
 type StreamDesc struct {
 	StreamName string
