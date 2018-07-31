@@ -46,7 +46,7 @@ var (
 // printFeature gets the feature for the given point.
 func printFeature(client pb.RouteGuideClient, point *pb.Point) {
 	log.Printf("Getting feature for point (%d, %d)", point.Latitude, point.Longitude)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 1000*time.Second)
 	defer cancel()
 	feature, err := client.GetFeature(ctx, point)
 	if err != nil {
@@ -177,16 +177,16 @@ func main() {
 
 	// Feature missing.
 	printFeature(client, &pb.Point{Latitude: 0, Longitude: 0})
-
-	// Looking for features between 40, -75 and 42, -73.
-	printFeatures(client, &pb.Rectangle{
-		Lo: &pb.Point{Latitude: 400000000, Longitude: -750000000},
-		Hi: &pb.Point{Latitude: 420000000, Longitude: -730000000},
-	})
-
-	// RecordRoute
-	runRecordRoute(client)
-
-	// RouteChat
-	runRouteChat(client)
+	//
+	//// Looking for features between 40, -75 and 42, -73.
+	//printFeatures(client, &pb.Rectangle{
+	//	Lo: &pb.Point{Latitude: 400000000, Longitude: -750000000},
+	//	Hi: &pb.Point{Latitude: 420000000, Longitude: -730000000},
+	//})
+	//
+	//// RecordRoute
+	//runRecordRoute(client)
+	//
+	//// RouteChat
+	//runRouteChat(client)
 }

@@ -294,6 +294,12 @@
     "name": "Berkshire Valley Management Area Trail, Jefferson, NJ, USA"
 }, {
     "location": {
+        "latitude": 409146139,
+        "longitude": -746188905
+    },
+    "name": "LALALA Berkshire Valley Management Area Trail, Jefferson, NJ, USA"
+}, {
+    "location": {
         "latitude": 404701380,
         "longitude": -744781745
     },

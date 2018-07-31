@@ -8,8 +8,12 @@ import fmt "fmt"
 import math "math"
 
 import (
+	"reflect"
+
 	context "golang.org/x/net/context"
 	grpc "google.golang.org/grpc"
+	"google.golang.org/grpc/grpclog"
+	"google.golang.org/grpc/smr"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -504,12 +508,48 @@ func _RouteGuide_GetFeature_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RouteGuide_GetFeature_Handler_Generator(srv *grpc.Server, handler interface{}) {
+	h, ok := handler.(func(context.Context, *Point) (*Feature, error))
+	if !ok {
+		grpclog.Warningf("Unable to register method /routeguide.RouteGuide/GetFeature to server, invalid handler signature: %v", reflect.TypeOf(handler))
+		return
+	}
+	rpcHandler := func(stream grpc.ServerStream) error {
+		in := new(Point)
+		if err := stream.RecvMsg(in); err != nil {
+			return err
+		}
+		reply, err := h(stream.Context(), in)
+		if reply != nil {
+			stream.SendMsg(reply)
+		}
+		return err
+	}
+	srv.RegisterMethod("/routeguide.RouteGuide/GetFeature", false, false, rpcHandler, "route_guide.proto")
+}
+
 func _RouteGuide_ListFeatures_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(Rectangle)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
 	return srv.(RouteGuideServer).ListFeatures(m, &routeGuideListFeaturesServer{stream})
+}
+
+func _RouteGuide_ListFeatures_Handler_Generator(srv *grpc.Server, handler interface{}) {
+	h, ok := handler.(func(*Rectangle, RouteGuide_ListFeaturesServer) error)
+	if !ok {
+		grpclog.Warningf("Unable to register method /routeguide.RouteGuide/ListFeatures to server, invalid handler signature: %v", reflect.TypeOf(handler))
+		return
+	}
+	rpcHandler := func(stream grpc.ServerStream) error {
+		m := new(Rectangle)
+		if err := stream.RecvMsg(m); err != nil {
+			return err
+		}
+		return h(m, &routeGuideListFeaturesServer{stream})
+	}
+	srv.RegisterMethod("/routeguide.RouteGuide/ListFeatures", false, true, rpcHandler, "route_guide.proto")
 }
 
 type RouteGuide_ListFeaturesServer interface {
@@ -527,6 +567,18 @@ func (x *routeGuideListFeaturesServer) Send(m *Feature) error {
 
 func _RouteGuide_RecordRoute_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(RouteGuideServer).RecordRoute(&routeGuideRecordRouteServer{stream})
+}
+
+func _RouteGuide_RecordRoute_Handler_Generator(srv *grpc.Server, handler interface{}) {
+	h, ok := handler.(func(RouteGuide_RecordRouteServer) error)
+	if !ok {
+		grpclog.Warningf("Unable to register method /routeguide.RouteGuide/RecordRoute to server, invalid handler signature: %v", reflect.TypeOf(handler))
+		return
+	}
+	rpcHandler := func(stream grpc.ServerStream) error {
+		return h(&routeGuideRecordRouteServer{stream})
+	}
+	srv.RegisterMethod("/routeguide.RouteGuide/RecordRoute", true, false, rpcHandler, "route_guide.proto")
 }
 
 type RouteGuide_RecordRouteServer interface {
@@ -553,6 +605,18 @@ func (x *routeGuideRecordRouteServer) Recv() (*Point, error) {
 
 func _RouteGuide_RouteChat_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(RouteGuideServer).RouteChat(&routeGuideRouteChatServer{stream})
+}
+
+func _RouteGuide_RouteChat_Handler_Generator(srv *grpc.Server, handler interface{}) {
+	h, ok := handler.(func(RouteGuide_RouteChatServer) error)
+	if !ok {
+		grpclog.Warningf("Unable to register method /routeguide.RouteGuide/RouteChat to server, invalid handler signature: %v", reflect.TypeOf(handler))
+		return
+	}
+	rpcHandler := func(stream grpc.ServerStream) error {
+		return h(&routeGuideRouteChatServer{stream})
+	}
+	srv.RegisterMethod("/routeguide.RouteGuide/RouteChat", true, true, rpcHandler, "route_guide.proto")
 }
 
 type RouteGuide_RouteChatServer interface {
@@ -605,6 +669,13 @@ var _RouteGuide_serviceDesc = grpc.ServiceDesc{
 		},
 	},
 	Metadata: "route_guide.proto",
+}
+
+func init() {
+	smr.RegisterMethodGenerator("/routeguide.RouteGuide/GetFeature", _RouteGuide_GetFeature_Handler_Generator)
+	smr.RegisterMethodGenerator("/routeguide.RouteGuide/ListFeatures", _RouteGuide_ListFeatures_Handler_Generator)
+	smr.RegisterMethodGenerator("/routeguide.RouteGuide/RecordRoute", _RouteGuide_RecordRoute_Handler_Generator)
+	smr.RegisterMethodGenerator("/routeguide.RouteGuide/RouteChat", _RouteGuide_RouteChat_Handler_Generator)
 }
 
 func init() { proto.RegisterFile("route_guide.proto", fileDescriptor_route_guide_dc79de2de4c66c19) }

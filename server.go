@@ -60,6 +60,14 @@ const (
 
 type methodHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor UnaryServerInterceptor) (interface{}, error)
 
+type RPCHandler func(stream ServerStream) error
+
+type rpcHandlerDesc struct {
+	clientStream bool
+	serverStream bool
+	handler      RPCHandler
+}
+
 // MethodDesc represents an RPC service's method specification.
 type MethodDesc struct {
 	MethodName string
@@ -90,14 +98,16 @@ type service struct {
 type Server struct {
 	opts options
 
-	mu     sync.Mutex // guards following
-	lis    map[net.Listener]bool
-	conns  map[io.Closer]bool
-	serve  bool
-	drain  bool
-	cv     *sync.Cond          // signaled when connections close for GracefulStop
-	m      map[string]*service // service name -> service info
-	events trace.EventLog
+	mu               sync.Mutex // guards following
+	lis              map[net.Listener]bool
+	conns            map[io.Closer]bool
+	serve            bool
+	drain            bool
+	cv               *sync.Cond          // signaled when connections close for GracefulStop
+	m                map[string]*service // service name -> service info
+	rpcHandlers      map[string]*rpcHandlerDesc
+	servicesMetadata map[string]interface{}
+	events           trace.EventLog
 
 	quit               chan struct{}
 	done               chan struct{}
@@ -360,12 +370,14 @@ func NewServer(opt ...ServerOption) *Server {
 		o(&opts)
 	}
 	s := &Server{
-		lis:   make(map[net.Listener]bool),
-		opts:  opts,
-		conns: make(map[io.Closer]bool),
-		m:     make(map[string]*service),
-		quit:  make(chan struct{}),
-		done:  make(chan struct{}),
+		lis:              make(map[net.Listener]bool),
+		opts:             opts,
+		conns:            make(map[io.Closer]bool),
+		m:                make(map[string]*service),
+		rpcHandlers:      make(map[string]*rpcHandlerDesc),
+		servicesMetadata: make(map[string]interface{}),
+		quit:             make(chan struct{}),
+		done:             make(chan struct{}),
 	}
 	s.cv = sync.NewCond(&s.mu)
 	if EnableTracing {
@@ -404,7 +416,7 @@ func (s *Server) RegisterService(sd *ServiceDesc, ss interface{}) {
 	if !st.Implements(ht) {
 		grpclog.Fatalf("grpc: Server.RegisterService found the handler of type %v that does not satisfy %v", st, ht)
 	}
-	s.register(sd, ss)
+	s.register2(sd, ss)
 }
 
 func (s *Server) register(sd *ServiceDesc, ss interface{}) {
@@ -414,7 +426,11 @@ func (s *Server) register(sd *ServiceDesc, ss interface{}) {
 	if s.serve {
 		grpclog.Fatalf("grpc: Server.RegisterService after Server.Serve for %q", sd.ServiceName)
 	}
+
 	if _, ok := s.m[sd.ServiceName]; ok {
+		grpclog.Fatalf("grpc: Server.RegisterService found duplicate service registration for %q", sd.ServiceName)
+	}
+	if _, ok := s.servicesMetadata[sd.ServiceName]; ok {
 		grpclog.Fatalf("grpc: Server.RegisterService found duplicate service registration for %q", sd.ServiceName)
 	}
 	srv := &service{
@@ -432,6 +448,93 @@ func (s *Server) register(sd *ServiceDesc, ss interface{}) {
 		srv.sd[d.StreamName] = d
 	}
 	s.m[sd.ServiceName] = srv
+}
+
+func (s *Server) register2(sd *ServiceDesc, ss interface{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.printf("RegisterService(%q)", sd.ServiceName)
+	if s.serve {
+		grpclog.Fatalf("grpc: Server.RegisterService after Server.Serve for %q", sd.ServiceName)
+	}
+	if _, ok := s.servicesMetadata[sd.ServiceName]; ok {
+		grpclog.Fatalf("grpc: Server.RegisterService found duplicate service registration for %q", sd.ServiceName)
+	}
+	for _, m := range sd.Methods {
+		h := m.Handler
+		var rpcHandle RPCHandler
+		if s.opts.unaryInt != nil {
+			rpcHandle = func(stream ServerStream) error {
+				resp, err := h(ss, stream.Context(), func(i interface{}) error {
+					err := stream.RecvMsg(i)
+					return err
+				}, s.opts.unaryInt)
+				if err != nil {
+					return err
+				}
+				if err := stream.SendMsg(resp); err != nil {
+					return err
+				}
+				return nil
+			}
+		} else {
+			rpcHandle = func(stream ServerStream) error {
+				resp, err := h(ss, stream.Context(), func(i interface{}) error {
+					err := stream.RecvMsg(i)
+					return err
+				}, nil)
+				if err != nil {
+					return err
+				}
+				if err := stream.SendMsg(resp); err != nil {
+					return err
+				}
+				return nil
+			}
+		}
+		s.registerMethod("/"+sd.ServiceName+"/"+m.MethodName, false, false, rpcHandle, sd.Metadata)
+	}
+	for _, m := range sd.Streams {
+		h := m.Handler
+		rpcHandle := func(stream ServerStream) error {
+			return h(ss, stream)
+		}
+		s.registerMethod("/"+sd.ServiceName+"/"+m.StreamName, m.ClientStreams, m.ServerStreams, rpcHandle, sd.Metadata)
+	}
+}
+
+func serviceNameMethodNameFromPath(fullpath string) (service string, method string) {
+	if fullpath != "" && fullpath[0] == '/' {
+		fullpath = fullpath[1:]
+	}
+	pos := strings.LastIndex(fullpath, "/")
+	if pos == -1 {
+		grpclog.Fatalf("grpc: serviceNameMethodNameFromPath mailformed path %q", fullpath)
+		return "", ""
+	}
+	return fullpath[:pos], fullpath[pos+1:]
+}
+
+func (s *Server) RegisterMethod(fullpath string, clientStream bool, serverStream bool, handler RPCHandler, serviceMetadata interface{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.registerMethod(fullpath, clientStream, serverStream, handler, serviceMetadata)
+}
+
+func (s *Server) registerMethod(fullpath string, clientStream bool, serverStream bool, handler RPCHandler, serviceMetadata interface{}) {
+	if _, ok := s.rpcHandlers[fullpath]; ok {
+		grpclog.Fatalf("grpc: Server.registerMethod found duplicate method registration for %q", fullpath)
+	}
+	service, _ := serviceNameMethodNameFromPath(fullpath)
+	if _, ok := s.m[service]; ok {
+		grpclog.Fatalf("grpc: Server.registerMethod found duplicate service registration for %q", fullpath)
+	}
+	s.rpcHandlers[fullpath] = &rpcHandlerDesc{
+		clientStream: clientStream,
+		serverStream: serverStream,
+		handler:      handler,
+	}
+	s.servicesMetadata[service] = serviceMetadata
 }
 
 // MethodInfo contains the information of an RPC including its method name and type.
@@ -475,6 +578,23 @@ func (s *Server) GetServiceInfo() map[string]ServiceInfo {
 		ret[n] = ServiceInfo{
 			Methods:  methods,
 			Metadata: srv.mdata,
+		}
+	}
+	for service, metadata := range s.servicesMetadata {
+		var methods []MethodInfo
+		for fullpath, handlerDesc := range s.rpcHandlers {
+			if strings.HasPrefix(fullpath, "/"+service) {
+				_, methodName := serviceNameMethodNameFromPath(fullpath)
+				methods = append(methods, MethodInfo{
+					Name:           methodName,
+					IsClientStream: handlerDesc.clientStream,
+					IsServerStream: handlerDesc.serverStream,
+				})
+			}
+		}
+		ret[service] = ServiceInfo{
+			Methods:  methods,
+			Metadata: metadata,
 		}
 	}
 	return ret
@@ -1084,6 +1204,71 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 	return t.WriteStatus(stream, status.New(codes.OK, ""))
 }
 
+//type fakeStreamInt struct {
+//	unaryInt  UnaryServerInterceptor
+//	unaryInfo *UnaryServerInfo
+//	request   chan interface{} // intercepted request
+//	response  chan interface{} // final response to send to client
+//	err       chan error       // error from user handler
+//	result    chan error       // final error value for the rpc
+//	cd        baseCodec
+//	ServerStream
+//}
+//
+//func (f *fakeStreamInt) getResult() error {
+//	return <-f.result
+//}
+//
+//func (f *fakeStreamInt) RecvMsg(m interface{}) error {
+//	err := f.ServerStream.RecvMsg(m)
+//	if err != nil {
+//		return err
+//	}
+//	// append stream to context?
+//	go func() {
+//		resp, err := f.unaryInt(f.ServerStream.Context(), m, f.unaryInfo, f.unaryHandler())
+//		if err == nil {
+//			f.ServerStream.SendMsg(resp)
+//		}
+//		f.result <- err
+//	}()
+//	select {
+//	case newreq := <-f.request:
+//		var b []byte
+//		if b, err = f.cd.Marshal(newreq); err != nil {
+//			return err
+//		}
+//		if err = f.cd.Unmarshal(b, m); err != nil {
+//			return err
+//		}
+//		return nil
+//	case err := <-f.result:
+//		return err
+//	}
+//	return nil
+//}
+//
+//func (f *fakeStreamInt) SendMsg(m interface{}) error {
+//	f.response <- m
+//	return nil
+//}
+//
+//func (f *fakeStreamInt) unaryHandler() UnaryHandler {
+//	return func(ctx context.Context, req interface{}) (interface{}, error) {
+//		f.request <- req
+//		select {
+//		case m := <-f.response:
+//			return m, nil
+//		case err := <-f.err:
+//			return nil, err
+//		}
+//	}
+//}
+//
+//func (f *fakeStreamInt) appErrored(err error) {
+//	f.err <- err
+//}
+
 func (s *Server) processStreamingRPC(t transport.ServerTransport, stream *transport.Stream, srv *service, sd *StreamDesc, trInfo *traceInfo) (err error) {
 	if channelz.IsOn() {
 		s.incrCallsStarted()
@@ -1172,7 +1357,14 @@ func (s *Server) processStreamingRPC(t transport.ServerTransport, stream *transp
 	if srv != nil {
 		server = srv.server
 	}
-	if s.opts.streamInt == nil {
+	if s.opts.unaryInt != nil && !sd.ClientStreams && !sd.ServerStreams {
+		ctx := NewContextWithServerTransportStream(stream.Context(), stream)
+		handler := func(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor UnaryServerInterceptor) (interface{}, error) {
+			err := sd.Handler(server, ss)
+			return nil, err
+		}
+		_, appErr = handler(server, ctx, nil, s.opts.unaryInt)
+	} else if s.opts.streamInt == nil || (!sd.ClientStreams && !sd.ServerStreams) {
 		appErr = sd.Handler(server, ss)
 	} else {
 		info := &StreamServerInfo{
@@ -1235,6 +1427,18 @@ func (s *Server) handleStream(t transport.ServerTransport, stream *transport.Str
 		}
 		return
 	}
+	if handlerDesc, ok := s.rpcHandlers[stream.Method()]; ok {
+		sd := &StreamDesc{
+			ClientStreams: handlerDesc.clientStream,
+			ServerStreams: handlerDesc.serverStream,
+			Handler: func(srv interface{}, stream ServerStream) error {
+				return handlerDesc.handler(stream)
+			},
+		}
+		s.processStreamingRPC(t, stream, &service{}, sd, trInfo)
+		return
+	}
+
 	service := sm[:pos]
 	method := sm[pos+1:]
 	srv, ok := s.m[service]

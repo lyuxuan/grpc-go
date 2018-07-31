@@ -45,13 +45,14 @@ import (
 	"github.com/golang/protobuf/proto"
 
 	pb "google.golang.org/grpc/examples/route_guide/routeguide"
+	"google.golang.org/grpc/smr"
 )
 
 var (
 	tls        = flag.Bool("tls", false, "Connection uses TLS if true, else plain TCP")
 	certFile   = flag.String("cert_file", "", "The TLS cert file")
 	keyFile    = flag.String("key_file", "", "The TLS key file")
-	jsonDBFile = flag.String("json_db_file", "testdata/route_guide_db.json", "A json file containing a list of features")
+	jsonDBFile = flag.String("json_db_file", "../testdata/route_guide_db.json", "A json file containing a list of features")
 	port       = flag.Int("port", 10000, "The server port")
 )
 
@@ -64,11 +65,14 @@ type routeGuideServer struct {
 
 // GetFeature returns the feature at the given point.
 func (s *routeGuideServer) GetFeature(ctx context.Context, point *pb.Point) (*pb.Feature, error) {
+	fmt.Println("inside getfeature", point)
 	for _, feature := range s.savedFeatures {
 		if proto.Equal(feature.Location, point) {
+			fmt.Println("GetFeature", feature.Name)
 			return feature, nil
 		}
 	}
+	fmt.Println("ohhhh")
 	// No feature was found, return an unnamed feature
 	return &pb.Feature{Location: point}, nil
 }
@@ -232,7 +236,23 @@ func main() {
 		}
 		opts = []grpc.ServerOption{grpc.Creds(creds)}
 	}
+	i := func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
+		lat, lot := req.(*pb.Point).GetLatitude(), req.(*pb.Point).GetLongitude()
+		fmt.Println("original lat lot", lat, lot)
+		fmt.Println("call handler")
+		newreq := &pb.Point{Latitude: lat + 1, Longitude: lot + 1}
+		hresp, _ := handler(ctx, newreq)
+		fmt.Println(hresp.(*pb.Feature).GetName(), hresp.(*pb.Feature).GetLocation().GetLatitude(), hresp.(*pb.Feature).GetLocation().GetLongitude())
+		resp = &pb.Feature{Name: "lalalal", Location: hresp.(*pb.Feature).GetLocation()}
+		return resp, nil
+	}
+
+	opts = append(opts, grpc.UnaryInterceptor(i))
 	grpcServer := grpc.NewServer(opts...)
-	pb.RegisterRouteGuideServer(grpcServer, newServer())
+	//pb.RegisterRouteGuideServer(grpcServer, newServer())
+	smr.RegisterMethodOnServer(grpcServer, "/routeguide.RouteGuide/GetFeature", newServer().GetFeature)
+	//smr.RegisterMethodOnServer(grpcServer, "/routeguide.RouteGuide/ListFeatures", newServer().ListFeatures)
+	//smr.RegisterMethodOnServer(grpcServer, "/routeguide.RouteGuide/RecordRoute", newServer().RecordRoute)
+	//smr.RegisterMethodOnServer(grpcServer, "/routeguide.RouteGuide/RouteChat", newServer().RouteChat)
 	grpcServer.Serve(lis)
 }
