@@ -1659,8 +1659,18 @@ func TestCZChannelConnectivityState(t *testing.T) {
 		// Channel's connectivity state changed to TRANSIENT_FAILURE
 		// Channel's connectivity state changed to CONNECTING
 		// Channel's connectivity state changed to TRANSIENT_FAILURE
+		f := func(ready int) string {
+			if ready <= 1 {
+				return ""
+			}
+			var s string
+			for _, e := range tcs[0].Trace.Events {
+				s += e.Desc + "\n"
+			}
+			return s
+		}
 		if ready != 1 || connecting < 1 || transient < 1 {
-			return false, fmt.Errorf("got: ready = %d, connecting = %d, transient = %d, want: 1, >=1, >=1", ready, connecting, transient)
+			return false, fmt.Errorf("got: ready = %d, connecting = %d, transient = %d, want: 1, >=1, >=1, %s", ready, connecting, transient, f(ready))
 		}
 		return true, nil
 	}); err != nil {
