@@ -1106,14 +1106,17 @@ func (ac *addrConn) createTransport(backoffNum int, addr resolver.Address, copts
 
 	if err == nil {
 		if ac.dopts.waitForHandshake {
+			fmt.Println("wait for handshake")
 			select {
 			case <-prefaceTimer.C:
 				// We didn't get the preface in time.
 				newTr.Close()
 				err = errors.New("timed out waiting for server handshake")
 			case <-prefaceReceived:
+				fmt.Println("got the preface")
 				// We got the preface - huzzah! things are good.
 			case <-onCloseCalled:
+				fmt.Println("on close called")
 				// The transport has already closed - noop.
 			}
 		} else {
