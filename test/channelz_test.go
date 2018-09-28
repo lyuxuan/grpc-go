@@ -1692,6 +1692,7 @@ func TestCZChannelConnectivityState(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	fmt.Println("--------------------------------------------")
 }
 
 func TestCZTraceOverwriteChannelDeletion(t *testing.T) {

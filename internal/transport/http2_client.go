@@ -32,6 +32,9 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
 
+	"fmt"
+	"runtime"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/internal/channelz"
@@ -747,6 +750,8 @@ func (t *http2Client) closeStream(s *Stream, err error, rst bool, rstCode http2.
 // addrConn level and blocks until the addrConn is successfully connected.
 func (t *http2Client) Close() error {
 	t.mu.Lock()
+	_, file, line, _ := runtime.Caller(1)
+	fmt.Printf("%s, %d, %p\n", file, line, t)
 	// Make sure we only Close once.
 	if t.state == closing {
 		t.mu.Unlock()

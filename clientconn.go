@@ -913,7 +913,7 @@ func (ac *addrConn) updateConnectivityState(s connectivity.State) {
 	ac.state = s
 	if channelz.IsOn() {
 		channelz.AddTraceEvent(ac.channelzID, &channelz.TraceEventDesc{
-			Desc:     fmt.Sprintf("Subchannel Connectivity change to %v", s),
+			Desc:     fmt.Sprintf("Subchannel Connectivity change to %v %p", s, ac),
 			Severity: channelz.CtINFO,
 		})
 	}
