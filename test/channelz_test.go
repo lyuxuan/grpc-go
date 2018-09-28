@@ -1669,8 +1669,20 @@ func TestCZChannelConnectivityState(t *testing.T) {
 			}
 			return s
 		}
+
+		f2 := func(ready int) string {
+			if ready <= 1 {
+				return ""
+			}
+			var s string
+			events := channelz.GetSubChannel(3).Trace.Events
+			for _, e := range events {
+				s += e.Desc + "\n"
+			}
+			return s
+		}
 		if ready != 1 || connecting < 1 || transient < 1 {
-			return false, fmt.Errorf("got: ready = %d, connecting = %d, transient = %d, want: 1, >=1, >=1, %s", ready, connecting, transient, f(ready))
+			return false, fmt.Errorf("got: ready = %d, connecting = %d, transient = %d, want: 1, >=1, >=1, %s, \n subchannel %s", ready, connecting, transient, f(ready), f2(ready))
 		}
 		return true, nil
 	}); err != nil {
