@@ -1615,7 +1615,7 @@ func TestCZSubChannelConnectivityState(t *testing.T) {
 func TestCZChannelConnectivityState(t *testing.T) {
 	defer leakcheck.Check(t)
 	channelz.NewChannelzStorage()
-	e := tcpClearRREnv
+	e := tcpTLSRREnv
 	te := newTest(t, e)
 	te.startServer(&testServer{security: e.security})
 	r, cleanup := manual.GenerateAndRegisterManualResolver()
@@ -1700,7 +1700,7 @@ func TestCZChannelConnectivityState(t *testing.T) {
 func TestCZTraceOverwriteChannelDeletion(t *testing.T) {
 	defer leakcheck.Check(t)
 	channelz.NewChannelzStorage()
-	e := tcpClearRREnv
+	e := tcpTLSEnv
 	// avoid calling API to set balancer type, which will void service config's change of balancer.
 	e.balancer = ""
 	te := newTest(t, e)
