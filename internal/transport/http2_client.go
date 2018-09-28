@@ -150,6 +150,7 @@ func newHTTP2Client(connectCtx, ctx context.Context, addr TargetInfo, opts Conne
 	scheme := "http"
 	ctx, cancel := context.WithCancel(ctx)
 	defer func() {
+		fmt.Println("newHTTP2Client returns %v", err)
 		if err != nil {
 			cancel()
 		}
@@ -1193,6 +1194,7 @@ func (t *http2Client) reader() {
 	// Check the validity of server preface.
 	frame, err := t.framer.fr.ReadFrame()
 	if err != nil {
+		fmt.Println("reader frame error %v", err)
 		t.Close() // this kicks off resetTransport, so must be last before return
 		return
 	}
