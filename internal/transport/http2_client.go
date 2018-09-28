@@ -157,6 +157,7 @@ func newHTTP2Client(connectCtx, ctx context.Context, addr TargetInfo, opts Conne
 	}()
 
 	conn, err := dial(connectCtx, opts.Dialer, addr.Addr)
+	fmt.Printf("newHTTP2Client dial error %v\n", err)
 	if err != nil {
 		if opts.FailOnNonTempDialError {
 			return nil, connectionErrorf(isTemporary(err), err, "transport: error while dialing: %v", err)
@@ -1194,7 +1195,7 @@ func (t *http2Client) reader() {
 	// Check the validity of server preface.
 	frame, err := t.framer.fr.ReadFrame()
 	if err != nil {
-		fmt.Println("reader frame error %v", err)
+		fmt.Printf("reader frame error %v\n", err)
 		t.Close() // this kicks off resetTransport, so must be last before return
 		return
 	}
