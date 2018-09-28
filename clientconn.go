@@ -29,6 +29,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"runtime"
+
 	"golang.org/x/net/context"
 	"golang.org/x/net/trace"
 	"google.golang.org/grpc/balancer"
@@ -904,6 +906,10 @@ type addrConn struct {
 
 // Note: this requires a lock on ac.mu.
 func (ac *addrConn) updateConnectivityState(s connectivity.State) {
+	if ac.state == connectivity.Ready && s == connectivity.Connecting {
+		_, file, line, _ := runtime.Caller(2)
+		fmt.Println(file, line)
+	}
 	ac.state = s
 	if channelz.IsOn() {
 		channelz.AddTraceEvent(ac.channelzID, &channelz.TraceEventDesc{

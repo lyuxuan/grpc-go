@@ -1675,7 +1675,11 @@ func TestCZChannelConnectivityState(t *testing.T) {
 				return ""
 			}
 			var s string
-			events := channelz.GetSubChannel(3).Trace.Events
+			subchan := channelz.GetSubChannel(3)
+			if subchan == nil {
+				return ""
+			}
+			events := subchan.Trace.Events
 			for _, e := range events {
 				s += e.Desc + "\n"
 			}
