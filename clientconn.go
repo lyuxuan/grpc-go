@@ -907,7 +907,7 @@ type addrConn struct {
 // Note: this requires a lock on ac.mu.
 func (ac *addrConn) updateConnectivityState(s connectivity.State) {
 	if ac.state == connectivity.Ready && s == connectivity.Connecting {
-		_, file, line, _ := runtime.Caller(2)
+		_, file, line, _ := runtime.Caller(1)
 		fmt.Println(file, line)
 	}
 	ac.state = s
