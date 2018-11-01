@@ -1204,8 +1204,10 @@ func (ac *addrConn) createTransport(backoffNum int, addr resolver.Address, copts
 	// 2. the internal.HealthCheckFunc is set by importing the grpc/healthcheck package,
 	// 3. a service config with non-empty healthCheckConfig field is provided,
 	// 4. the current load balancer allows it.
+	fmt.Println("checkfor health check condition", !ac.cc.dopts.disableHealthCheck && healthCheckConfig != nil && ac.scopts.HealthCheckEnabled && internal.HealthCheckFunc != nil)
 	if !ac.cc.dopts.disableHealthCheck && healthCheckConfig != nil && ac.scopts.HealthCheckEnabled {
 		if internal.HealthCheckFunc != nil {
+			fmt.Println("start Healthcheck [before go]")
 			go ac.startHealthCheck(hcCtx, newTr, addr, healthCheckConfig.ServiceName)
 			close(allowedToReset)
 			return nil
@@ -1238,6 +1240,7 @@ func (ac *addrConn) createTransport(backoffNum int, addr resolver.Address, copts
 }
 
 func (ac *addrConn) startHealthCheck(ctx context.Context, newTr transport.ClientTransport, addr resolver.Address, serviceName string) {
+	fmt.Println("inside startHealthCheck")
 	// Set up the health check helper functions
 	newStream := func() (interface{}, error) {
 		return ac.newClientStream(ctx, &StreamDesc{ServerStreams: true}, "/grpc.health.v1.Health/Watch", newTr)
@@ -1265,7 +1268,7 @@ func (ac *addrConn) startHealthCheck(ctx context.Context, newTr transport.Client
 			}
 		}
 	}
-
+	fmt.Println("before calling Healthcheckfunc")
 	err := internal.HealthCheckFunc(ctx, newStream, reportHealth, serviceName)
 	if err != nil {
 		if status.Code(err) == codes.Unimplemented {
