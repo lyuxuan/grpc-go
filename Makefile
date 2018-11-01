@@ -17,7 +17,7 @@ proto:
 	go generate google.golang.org/grpc/...
 
 test: testdeps
-	go test -cpu 1,4 -timeout 7m ./test -run TestHealthCheckWithoutReportHealthCalledAddrConnShutDown -count 1000
+	go test -cpu 1,4 -timeout 7m ./test -run TestHealthCheckWithoutReportHealthCalledAddrConnShutDown -count 1000 -v
 
 testappengine: testappenginedeps
 	goapp test -cpu 1,4 -timeout 7m google.golang.org/grpc/...
@@ -29,7 +29,7 @@ testdeps:
 	go get -d -v -t google.golang.org/grpc/...
 
 testrace: testdeps
-	go test -race -cpu 1,4 -timeout 7m ./test -run TestHealthCheckWithoutReportHealthCalledAddrConnShutDown -count 1000
+	go test -race -cpu 1,4 -timeout 7m ./test -run TestHealthCheckWithoutReportHealthCalledAddrConnShutDown -count 1000 -v
 
 updatedeps:
 	go get -d -v -u -f google.golang.org/grpc/...

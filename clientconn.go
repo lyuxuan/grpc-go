@@ -1204,7 +1204,7 @@ func (ac *addrConn) createTransport(backoffNum int, addr resolver.Address, copts
 	// 2. the internal.HealthCheckFunc is set by importing the grpc/healthcheck package,
 	// 3. a service config with non-empty healthCheckConfig field is provided,
 	// 4. the current load balancer allows it.
-	fmt.Println("checkfor health check condition", !ac.cc.dopts.disableHealthCheck && healthCheckConfig != nil && ac.scopts.HealthCheckEnabled && internal.HealthCheckFunc != nil)
+	fmt.Println("checkfor health check condition", !ac.cc.dopts.disableHealthCheck, healthCheckConfig != nil, ac.scopts.HealthCheckEnabled, internal.HealthCheckFunc != nil)
 	if !ac.cc.dopts.disableHealthCheck && healthCheckConfig != nil && ac.scopts.HealthCheckEnabled {
 		if internal.HealthCheckFunc != nil {
 			fmt.Println("start Healthcheck [before go]")
