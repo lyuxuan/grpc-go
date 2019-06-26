@@ -37,6 +37,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/reflection"
+
 	"google.golang.org/grpc"
 
 	"google.golang.org/grpc/credentials"
@@ -240,6 +242,8 @@ func main() {
 	}
 	grpcServer := grpc.NewServer(opts...)
 	pb.RegisterRouteGuideServer(grpcServer, newServer())
+	pb.RegisterRouteGuideServerWithServiceRenamed(grpcServer, newServer(), "rg")
+	reflection.Register(grpcServer)
 	grpcServer.Serve(lis)
 }
 

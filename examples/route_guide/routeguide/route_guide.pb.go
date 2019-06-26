@@ -3,11 +3,17 @@
 
 package routeguide
 
-import proto "github.com/golang/protobuf/proto"
-import fmt "fmt"
-import math "math"
-
 import (
+	"bytes"
+	"compress/gzip"
+	fmt "fmt"
+	"io/ioutil"
+	"strings"
+
+	math "math"
+
+	proto "github.com/golang/protobuf/proto"
+	dpb "github.com/golang/protobuf/protoc-gen-go/descriptor"
 	context "golang.org/x/net/context"
 	grpc "google.golang.org/grpc"
 )
@@ -341,16 +347,27 @@ type RouteGuideClient interface {
 }
 
 type routeGuideClient struct {
-	cc *grpc.ClientConn
+	cc          *grpc.ClientConn
+	serviceName string
 }
 
 func NewRouteGuideClient(cc *grpc.ClientConn) RouteGuideClient {
-	return &routeGuideClient{cc}
+	return &routeGuideClient{
+		cc:          cc,
+		serviceName: "routeguide.RouteGuide",
+	}
+}
+
+func NewRouteGuideClientWithServiceRenamed(cc *grpc.ClientConn, serviceName string) RouteGuideClient {
+	return &routeGuideClient{
+		cc:          cc,
+		serviceName: serviceName,
+	}
 }
 
 func (c *routeGuideClient) GetFeature(ctx context.Context, in *Point, opts ...grpc.CallOption) (*Feature, error) {
 	out := new(Feature)
-	err := c.cc.Invoke(ctx, "/routeguide.RouteGuide/GetFeature", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/"+c.serviceName+"/GetFeature", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -358,7 +375,7 @@ func (c *routeGuideClient) GetFeature(ctx context.Context, in *Point, opts ...gr
 }
 
 func (c *routeGuideClient) ListFeatures(ctx context.Context, in *Rectangle, opts ...grpc.CallOption) (RouteGuide_ListFeaturesClient, error) {
-	stream, err := c.cc.NewStream(ctx, &_RouteGuide_serviceDesc.Streams[0], "/routeguide.RouteGuide/ListFeatures", opts...)
+	stream, err := c.cc.NewStream(ctx, &_RouteGuide_serviceDesc.Streams[0], "/"+c.serviceName+"/ListFeatures", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +407,7 @@ func (x *routeGuideListFeaturesClient) Recv() (*Feature, error) {
 }
 
 func (c *routeGuideClient) RecordRoute(ctx context.Context, opts ...grpc.CallOption) (RouteGuide_RecordRouteClient, error) {
-	stream, err := c.cc.NewStream(ctx, &_RouteGuide_serviceDesc.Streams[1], "/routeguide.RouteGuide/RecordRoute", opts...)
+	stream, err := c.cc.NewStream(ctx, &_RouteGuide_serviceDesc.Streams[1], "/"+c.serviceName+"/RecordRoute", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -424,7 +441,7 @@ func (x *routeGuideRecordRouteClient) CloseAndRecv() (*RouteSummary, error) {
 }
 
 func (c *routeGuideClient) RouteChat(ctx context.Context, opts ...grpc.CallOption) (RouteGuide_RouteChatClient, error) {
-	stream, err := c.cc.NewStream(ctx, &_RouteGuide_serviceDesc.Streams[2], "/routeguide.RouteGuide/RouteChat", opts...)
+	stream, err := c.cc.NewStream(ctx, &_RouteGuide_serviceDesc.Streams[2], "/"+c.serviceName+"/RouteChat", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -483,10 +500,51 @@ type RouteGuideServer interface {
 }
 
 func RegisterRouteGuideServer(s *grpc.Server, srv RouteGuideServer) {
-	s.RegisterService(&_RouteGuide_serviceDesc, srv)
+	s.RegisterService(_RouteGuide_serviceDesc, srv)
 }
 
-func _RouteGuide_GetFeature_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func RegisterRouteGuideServerWithServiceRenamed(s *grpc.Server, srv RouteGuideServer, serviceName string) {
+	fd := decodeFileDesc(proto.FileDescriptor(_RouteGuide_serviceDesc.Metadata.(string)))
+	var nfd dpb.FileDescriptorProto
+	name := strings.Join([]string{"rename", serviceName, "routeguide.RouteGuide"}, "-")
+	nfd.Name = &name
+	nfd.Dependency = []string{"route_guide.proto"}
+	nfd.Service = fd.GetService()
+	for i := range nfd.GetService() {
+		if nfd.Service[i].GetName() == "RouteGuide" {
+			nfd.Service[i].Name = &serviceName
+			break
+		}
+	}
+
+	b, _ := proto.Marshal(&nfd)
+	var buf bytes.Buffer
+	w, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	w.Write(b)
+	w.Close()
+	b = buf.Bytes()
+	proto.RegisterFile(serviceName, b)
+	s.RegisterService(generateServiceDesc(serviceName, serviceName), srv)
+}
+
+func decodeFileDesc(enc []byte) *dpb.FileDescriptorProto {
+	raw := decompress(enc)
+	fd := new(dpb.FileDescriptorProto)
+	proto.Unmarshal(raw, fd)
+	return fd
+}
+
+func decompress(b []byte) []byte {
+	r, _ := gzip.NewReader(bytes.NewReader(b))
+	out, _ := ioutil.ReadAll(r)
+	return out
+}
+
+type serverHandlerHook struct {
+	serviceName string
+}
+
+func (s *serverHandlerHook) RouteGuide_GetFeature_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(Point)
 	if err := dec(in); err != nil {
 		return nil, err
@@ -496,7 +554,7 @@ func _RouteGuide_GetFeature_Handler(srv interface{}, ctx context.Context, dec fu
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/routeguide.RouteGuide/GetFeature",
+		FullMethod: "/" + s.serviceName + "/GetFeature",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RouteGuideServer).GetFeature(ctx, req.(*Point))
@@ -504,7 +562,7 @@ func _RouteGuide_GetFeature_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
-func _RouteGuide_ListFeatures_Handler(srv interface{}, stream grpc.ServerStream) error {
+func (s *serverHandlerHook) RouteGuide_ListFeatures_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(Rectangle)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
@@ -525,7 +583,7 @@ func (x *routeGuideListFeaturesServer) Send(m *Feature) error {
 	return x.ServerStream.SendMsg(m)
 }
 
-func _RouteGuide_RecordRoute_Handler(srv interface{}, stream grpc.ServerStream) error {
+func (s *serverHandlerHook) RouteGuide_RecordRoute_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(RouteGuideServer).RecordRoute(&routeGuideRecordRouteServer{stream})
 }
 
@@ -551,7 +609,7 @@ func (x *routeGuideRecordRouteServer) Recv() (*Point, error) {
 	return m, nil
 }
 
-func _RouteGuide_RouteChat_Handler(srv interface{}, stream grpc.ServerStream) error {
+func (s *serverHandlerHook) RouteGuide_RouteChat_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(RouteGuideServer).RouteChat(&routeGuideRouteChatServer{stream})
 }
 
@@ -577,35 +635,41 @@ func (x *routeGuideRouteChatServer) Recv() (*RouteNote, error) {
 	return m, nil
 }
 
-var _RouteGuide_serviceDesc = grpc.ServiceDesc{
-	ServiceName: "routeguide.RouteGuide",
-	HandlerType: (*RouteGuideServer)(nil),
-	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "GetFeature",
-			Handler:    _RouteGuide_GetFeature_Handler,
+func generateServiceDesc(serviceName, protoFileName string) *grpc.ServiceDesc {
+	hook := &serverHandlerHook{serviceName: serviceName}
+	return &grpc.ServiceDesc{
+		ServiceName: serviceName,
+		HandlerType: (*RouteGuideServer)(nil),
+		Methods: []grpc.MethodDesc{
+			{
+				MethodName: "GetFeature",
+				Handler:    hook.RouteGuide_GetFeature_Handler,
+			},
 		},
-	},
-	Streams: []grpc.StreamDesc{
-		{
-			StreamName:    "ListFeatures",
-			Handler:       _RouteGuide_ListFeatures_Handler,
-			ServerStreams: true,
+		Streams: []grpc.StreamDesc{
+			{
+				StreamName:    "ListFeatures",
+				Handler:       hook.RouteGuide_ListFeatures_Handler,
+				ServerStreams: true,
+			},
+			{
+				StreamName:    "RecordRoute",
+				Handler:       hook.RouteGuide_RecordRoute_Handler,
+				ClientStreams: true,
+			},
+			{
+				StreamName:    "RouteChat",
+				Handler:       hook.RouteGuide_RouteChat_Handler,
+				ServerStreams: true,
+				ClientStreams: true,
+			},
 		},
-		{
-			StreamName:    "RecordRoute",
-			Handler:       _RouteGuide_RecordRoute_Handler,
-			ClientStreams: true,
-		},
-		{
-			StreamName:    "RouteChat",
-			Handler:       _RouteGuide_RouteChat_Handler,
-			ServerStreams: true,
-			ClientStreams: true,
-		},
-	},
-	Metadata: "route_guide.proto",
+		Metadata: protoFileName,
+	}
 }
+
+// _RouteGuide_serviceDesc is the default serviceDesc without service renaming.
+var _RouteGuide_serviceDesc = generateServiceDesc("routeguide.RouteGuide", "route_guide.proto")
 
 func init() { proto.RegisterFile("route_guide.proto", fileDescriptor_route_guide_dc79de2de4c66c19) }
 

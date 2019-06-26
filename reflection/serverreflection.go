@@ -100,7 +100,9 @@ func (s *serverReflectionServer) getSymbols() (svcNames []string, symbolIndex ma
 		}
 		sort.Strings(s.serviceNames)
 	})
-
+	for k, _ := range s.symbols {
+		fmt.Println(k)
+	}
 	return s.serviceNames, s.symbols
 }
 
