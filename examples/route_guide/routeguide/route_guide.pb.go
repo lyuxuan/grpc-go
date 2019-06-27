@@ -8,7 +8,6 @@ import (
 	"compress/gzip"
 	fmt "fmt"
 	"io/ioutil"
-	"strings"
 
 	math "math"
 
@@ -506,7 +505,7 @@ func RegisterRouteGuideServer(s *grpc.Server, srv RouteGuideServer) {
 func RegisterRouteGuideServerWithServiceRenamed(s *grpc.Server, srv RouteGuideServer, serviceName string) {
 	fd := decodeFileDesc(proto.FileDescriptor(_RouteGuide_serviceDesc.Metadata.(string)))
 	var nfd dpb.FileDescriptorProto
-	name := strings.Join([]string{"rename", serviceName, "routeguide.RouteGuide"}, "-")
+	name := "rename-" + serviceName + "-routeguide.RouteGuide"
 	nfd.Name = &name
 	nfd.Dependency = []string{"route_guide.proto"}
 	nfd.Service = fd.GetService()
@@ -517,7 +516,10 @@ func RegisterRouteGuideServerWithServiceRenamed(s *grpc.Server, srv RouteGuideSe
 		}
 	}
 
-	b, _ := proto.Marshal(&nfd)
+	b, err := proto.Marshal(&nfd)
+	if err != nil {
+		panic(fmt.Sprintf("failed to marshal, err: %v", err))
+	}
 	var buf bytes.Buffer
 	w, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
 	w.Write(b)
@@ -530,13 +532,21 @@ func RegisterRouteGuideServerWithServiceRenamed(s *grpc.Server, srv RouteGuideSe
 func decodeFileDesc(enc []byte) *dpb.FileDescriptorProto {
 	raw := decompress(enc)
 	fd := new(dpb.FileDescriptorProto)
-	proto.Unmarshal(raw, fd)
+	if err := proto.Unmarshal(raw, fd); err != nil {
+		panic(fmt.Sprintf("bad descriptor: %v", err))
+	}
 	return fd
 }
 
 func decompress(b []byte) []byte {
-	r, _ := gzip.NewReader(bytes.NewReader(b))
-	out, _ := ioutil.ReadAll(r)
+	r, err := gzip.NewReader(bytes.NewReader(b))
+	if err != nil {
+		panic(fmt.Sprintf("bad gzipped descriptor: %v", err))
+	}
+	out, err := ioutil.ReadAll(r)
+	if err != nil {
+		panic(fmt.Sprintf("bad gzipped descriptor: %v", err))
+	}
 	return out
 }
 
